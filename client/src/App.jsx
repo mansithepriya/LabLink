@@ -66,6 +66,7 @@ export default function App() {
   const [aiDesc, setAiDesc] = useState('Characterization of fast switching transients and ringing in Gallium Nitride half-bridge modules at 500 kHz. Requires 1 GHz real-time bandwidth and high voltage differential probes.');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResults, setAiResults] = useState(null);
+  const [aiEngineStatus, setAiEngineStatus] = useState(null);
 
   // Booking Modal State
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -143,10 +144,24 @@ export default function App() {
     }
   };
 
+  // Fetch AI Engine Status
+  const fetchAiStatus = async () => {
+    try {
+      const res = await fetch('/api/ai/status');
+      if (res.ok) {
+        const data = await res.json();
+        setAiEngineStatus(data.data);
+      }
+    } catch (e) {
+      console.warn('AI status check:', e.message);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     fetchData();
     fetchIotData();
+    fetchAiStatus();
   }, []);
 
   // Periodic Telemetry Simulation Polling (every 4 seconds when active)
@@ -1086,13 +1101,40 @@ export default function App() {
         {/* TAB 2: AI PROJECT-TO-EQUIPMENT MATCHER */}
         {activeTab === 'ai' && (
           <div>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--forest-800)' }}>
-                GenAI Project-to-Equipment Matcher
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                State your hypothesis, test method, or deliverable needs. AI extracts hardware parameters and identifies suitable equipment grounded in actual campus inventory.
-              </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--forest-800)' }}>
+                  GenAI Project-to-Equipment Matcher
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  State your hypothesis, test method, or deliverable needs. AI extracts hardware parameters and identifies suitable equipment grounded in actual campus inventory.
+                </p>
+              </div>
+
+              {/* Live Provider Indicator Pill */}
+              <div>
+                {aiResults ? (
+                  aiResults.provider === 'gemini' ? (
+                    <span className="badge badge-lime" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}>
+                      <Sparkles size={14} /> Google Gemini ({aiResults.model || 'Flash'}) • Live Grounded
+                    </span>
+                  ) : (
+                    <span className="badge badge-fairalloc" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}>
+                      <Cpu size={14} /> Institutional Deterministic Engine (Offline Fallback)
+                    </span>
+                  )
+                ) : aiEngineStatus ? (
+                  aiEngineStatus.isConfigured ? (
+                    <span className="badge badge-lime" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}>
+                      <Sparkles size={14} /> Gemini {aiEngineStatus.model} Ready
+                    </span>
+                  ) : (
+                    <span className="badge badge-fairalloc" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}>
+                      <Cpu size={14} /> Offline Rule Engine Active
+                    </span>
+                  )
+                ) : null}
+              </div>
             </div>
 
             <div className="grid-2" style={{ alignItems: 'start' }}>
@@ -1190,11 +1232,24 @@ export default function App() {
 
                 {aiResults && (
                   <div>
+                    {/* Fallback Notice if applicable */}
+                    {aiResults.fallbackReason && (
+                      <div style={{ background: '#FFFBEB', borderLeft: '3px solid #F59E0B', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: '#92400E', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Info size={14} style={{ flexShrink: 0 }} />
+                        <span><strong>Engine Status:</strong> {aiResults.fallbackReason}</span>
+                      </div>
+                    )}
+
                     {/* Extracted Parameters Card */}
                     <div className="card" style={{ marginBottom: '1rem', borderLeft: '4px solid var(--teal-600)' }}>
-                      <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--forest-800)', marginBottom: '0.5rem' }}>
-                        Extracted Hardware Requirements
-                      </h4>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--forest-800)' }}>
+                          Extracted Hardware Requirements
+                        </h4>
+                        <span className="badge badge-fairalloc" style={{ fontSize: '0.75rem' }}>
+                          {aiResults.extractedRequirements?.projectCategory || 'Academic Research'}
+                        </span>
+                      </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.5rem' }}>
                         {aiResults.extractedRequirements?.extractedCapabilities?.map((cap, i) => (
                           <span key={i} className="badge badge-fairalloc">{cap}</span>
@@ -1204,6 +1259,20 @@ export default function App() {
                         Recommended Session Duration: ~{aiResults.extractedRequirements?.estimatedSessionHours || 2} hours.
                       </p>
                     </div>
+
+                    {/* Missing / Ambiguous Information Suggestions */}
+                    {aiResults.missingOrAmbiguousInfo && aiResults.missingOrAmbiguousInfo.length > 0 && (
+                      <div className="card" style={{ marginBottom: '1rem', borderLeft: '4px solid #F59E0B', background: '#FFFDF5' }}>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#92400E', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <AlertTriangle size={14} /> Identified Clarifications / Suggested Parameters
+                        </h4>
+                        <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: '#78350F' }}>
+                          {aiResults.missingOrAmbiguousInfo.map((item, idx) => (
+                            <li key={idx} style={{ marginBottom: '0.2rem' }}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     {/* Grounded Recommendations */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1215,7 +1284,7 @@ export default function App() {
                                 {rec.equipmentName}
                               </h4>
                               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                {rec.department} â€¢ Room: {rec.labRoom}
+                                {rec.department} • Room: {rec.labRoom}
                               </p>
                             </div>
                             <span className="badge badge-fairalloc" style={{ fontSize: '0.85rem' }}>
@@ -1245,6 +1314,29 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Unavailable Equipment (e.g. Under Maintenance) */}
+                    {aiResults.unavailableEquipment && aiResults.unavailableEquipment.length > 0 && (
+                      <div style={{ marginTop: '1.25rem' }}>
+                        <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <AlertTriangle size={14} style={{ color: '#D97706' }} /> Matching Equipment Currently Ineligible for Booking
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          {aiResults.unavailableEquipment.map((unav) => (
+                            <div key={unav.equipmentId} className="card" style={{ opacity: 0.85, border: '1px dashed var(--border-color)', background: '#F9FAFB' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                <h5 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>{unav.equipmentName}</h5>
+                                <span className="badge badge-warning" style={{ fontSize: '0.75rem' }}>Under Maintenance</span>
+                              </div>
+                              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{unav.groundedRationale}</p>
+                              <button className="btn btn-outline" disabled style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', cursor: 'not-allowed' }}>
+                                FAIRALLOC Lockout Active
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

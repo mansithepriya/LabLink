@@ -4,6 +4,7 @@ import app from '../app.js';
 import { store } from '../services/store.js';
 import { FairAllocEngine } from '../services/fairalloc.js';
 import { CalendarConnectService } from '../services/calendarConnect.js';
+import { AiMatcherService, sanitizeInput, safeParseJson } from '../services/aiMatcher.js';
 
 const request = testClient;
 
@@ -594,6 +595,248 @@ describe('LABLINK Pre-Deployment Engineering Audit Test Suite', () => {
       const textWithSpecialChars = 'GaN modules, tests; with \\backslashes\\ and\nnew lines.';
       const escaped = CalendarConnectService.escapeIcsText(textWithSpecialChars);
       expect(escaped).toBe('GaN modules\\, tests\\; with \\\\backslashes\\\\ and\\nnew lines.');
+    });
+  });
+
+  describe('14. Live Gemini API Integration, Catalogue Grounding & Fallback Resilience', () => {
+    it('GET /api/ai/status returns current AI configuration and offline/online status', async () => {
+      const res = await request(app).get('/api/ai/status');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.provider).toBeDefined();
+      expect(res.body.data.model).toBeDefined();
+      expect(typeof res.body.data.isConfigured).toBe('boolean');
+    });
+
+    it('sanitizes input: truncates text exceeding limit and redacts PII', () => {
+      const longInput = 'A'.repeat(5000);
+      const sanitized = sanitizeInput(longInput, 4000);
+      expect(sanitized.length).toBe(4000);
+
+      const piiText = 'Contact student at student123@campus.edu or call +1 555-123-4567 for access.';
+      const cleaned = sanitizeInput(piiText);
+      expect(cleaned).not.toContain('student123@campus.edu');
+      expect(cleaned).toContain('[REDACTED_EMAIL]');
+      expect(cleaned).not.toContain('555-123-4567');
+      expect(cleaned).toContain('[REDACTED_PHONE]');
+    });
+
+    it('falls back seamlessly to deterministic engine when GEMINI_API_KEY is not set', async () => {
+      AiMatcherService.clearMockClient();
+      const payload = {
+        title: 'Deep learning diffusion training',
+        description: 'Need multi-GPU cluster with 80GB VRAM to train transformer model with fp8 tensor cores.'
+      };
+      const res = await request(app).post('/api/ai/match').send(payload);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.provider).toBe('deterministic_fallback');
+      expect(res.body.data.providerStatus).toBe('offline_rule_based');
+      expect(res.body.data.fallbackReason).toContain('GEMINI_API_KEY');
+      expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_3')).toBe(true);
+    });
+
+    it('processes mocked live Gemini API response with strict catalogue grounding', async () => {
+      const mockGeminiResponse = {
+        text: JSON.stringify({
+          projectCategory: 'Master Thesis',
+          extractedCapabilities: ['High-Frequency Signal Acquisition', 'Differential Waveform Characterization'],
+          technicalSpecifications: { bandwidth: '1 GHz', channels: 4 },
+          estimatedSessionHours: 4,
+          missingOrAmbiguousInfo: ['Probing impedance and attenuation factor not stated'],
+          recommendations: [
+            {
+              equipmentId: 'eq_1',
+              matchScore: 95,
+              groundedRationale: 'Keysight 1 GHz bandwidth matches high-frequency inverter ringing analysis.'
+            },
+            {
+              // Hallucinated ID from hypothetical rogue model output
+              equipmentId: 'eq_fantasy_instrument_999',
+              matchScore: 99,
+              groundedRationale: 'Invented fictional machine.'
+            }
+          ]
+        })
+      };
+
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => mockGeminiResponse
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'Wide-bandgap inverter testing',
+          description: 'High-frequency switching measurement on GaN half-bridge with 1 GHz bandwidth requirement.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe('gemini');
+        expect(res.body.data.providerStatus).toBe('live');
+        expect(res.body.data.extractedRequirements.projectCategory).toBe('Master Thesis');
+        expect(res.body.data.extractedRequirements.estimatedSessionHours).toBe(4);
+        expect(res.body.data.missingOrAmbiguousInfo.length).toBeGreaterThan(0);
+
+        // Grounding enforcement check:
+        // eq_1 must exist in recommendations
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_1')).toBe(true);
+        // eq_fantasy_instrument_999 MUST be rejected / filtered out
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_fantasy_instrument_999')).toBe(false);
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
+    });
+
+    it('separates equipment under maintenance into unavailableEquipment', async () => {
+      const mockGeminiResponse = {
+        text: JSON.stringify({
+          projectCategory: 'Capstone',
+          extractedCapabilities: ['Tensile Characterization', 'High-Frequency RF'],
+          estimatedSessionHours: 3,
+          recommendations: [
+            {
+              equipmentId: 'eq_1', // Operational
+              matchScore: 90,
+              groundedRationale: 'Operational oscilloscope.'
+            },
+            {
+              equipmentId: 'eq_7', // In maintenance (Instron)
+              matchScore: 85,
+              groundedRationale: 'Mechanical tensile tester.'
+            }
+          ]
+        })
+      };
+
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => mockGeminiResponse
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'Composite material test',
+          description: 'Evaluating tensile strength and transducer RF signal output.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_1')).toBe(true);
+        expect(res.body.data.unavailableEquipment.some(u => u.equipmentId === 'eq_7')).toBe(true);
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_7')).toBe(false);
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
+    });
+
+    it('recovers from malformed JSON response and falls back to deterministic engine', async () => {
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => ({
+            text: 'I cannot provide JSON right now, sorry!'
+          })
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'Scanning Electron Microscopy',
+          description: 'Need high magnification 100000x SEM imaging and nanoscale surface morphology.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe('deterministic_fallback');
+        expect(res.body.data.fallbackReason).toContain('unparseable output');
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_2')).toBe(true);
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
+    });
+
+    it('handles 429 rate limit error gracefully with deterministic fallback', async () => {
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => {
+            const err = new Error('Resource has been exhausted (e.g. check quota). [429]');
+            err.status = 429;
+            throw err;
+          }
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'Confocal microscopy sample',
+          description: 'Confocal laser scanning with live cell fluorescence staining.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe('deterministic_fallback');
+        expect(res.body.data.fallbackReason).toContain('rate limit');
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_6')).toBe(true);
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
+    });
+
+    it('handles 401 invalid credentials gracefully without exposing API keys', async () => {
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => {
+            const err = new Error('API key not valid. Please pass a valid API key. [401]');
+            err.status = 401;
+            throw err;
+          }
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'SLA 3D printing enclosure',
+          description: 'Prototyping enclosure using SLA resin 3D printing.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe('deterministic_fallback');
+        expect(res.body.data.fallbackReason).toContain('authentication failed');
+        // Credentials must not appear in response
+        expect(JSON.stringify(res.body)).not.toContain('AIzaSy');
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
+    });
+
+    it('handles timeout gracefully with deterministic fallback', async () => {
+      AiMatcherService.setMockClient({
+        models: {
+          generateContent: async () => {
+            const err = new Error('Gemini API request timed out after 10000ms');
+            err.name = 'TimeoutError';
+            throw err;
+          }
+        }
+      });
+
+      try {
+        const payload = {
+          title: 'Robotics trajectory control',
+          description: 'Articulated robotic arm sample handling with high repeatability.'
+        };
+        const res = await request(app).post('/api/ai/match').send(payload);
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe('deterministic_fallback');
+        expect(res.body.data.fallbackReason).toContain('timed out');
+        expect(res.body.data.recommendations.some(r => r.equipmentId === 'eq_8')).toBe(true);
+      } finally {
+        AiMatcherService.clearMockClient();
+      }
     });
   });
 });

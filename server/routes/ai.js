@@ -4,8 +4,27 @@ import { store } from '../services/store.js';
 
 const router = express.Router();
 
-// POST /api/ai/match - Extract requirements and match against real catalogue
-router.post('/match', (req, res) => {
+// GET /api/ai/status - Report current AI engine configuration and live status
+router.get('/status', (req, res) => {
+  const isConfigured = Boolean(process.env.GEMINI_API_KEY);
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+  res.json({
+    success: true,
+    data: {
+      provider: isConfigured ? 'gemini' : 'deterministic_fallback',
+      model: isConfigured ? model : 'deterministic_rule_engine',
+      providerStatus: isConfigured ? 'live' : 'offline_rule_based',
+      isConfigured,
+      description: isConfigured
+        ? `Configured with Google Gemini API (${model}) with strict catalogue grounding.`
+        : 'Running in offline mode using institutional deterministic rule extractor.'
+    }
+  });
+});
+
+// POST /api/ai/match - Extract requirements and match against verified campus inventory
+router.post('/match', async (req, res) => {
   try {
     const { title, description } = req.body;
 
@@ -16,21 +35,33 @@ router.post('/match', (req, res) => {
       });
     }
 
-    const extractedRequirements = AiMatcherService.extractRequirements(description, title || '');
     const catalogue = store.getEquipment();
-    const matches = AiMatcherService.matchEquipmentWithCatalogue(extractedRequirements, catalogue);
+    const result = await AiMatcherService.matchProject({
+      title: title || '',
+      description,
+      catalogue
+    });
 
     res.json({
       success: true,
       data: {
-        extractedRequirements,
-        matchedCount: matches.length,
-        recommendations: matches,
-        note: 'AI matched against real verified laboratory inventory. Allocation availability is governed by FAIRALLOC.'
+        provider: result.provider,
+        model: result.model,
+        providerStatus: result.providerStatus,
+        fallbackReason: result.fallbackReason || null,
+        extractedRequirements: result.extractedRequirements,
+        missingOrAmbiguousInfo: result.missingOrAmbiguousInfo || [],
+        matchedCount: result.recommendations.length,
+        recommendations: result.recommendations,
+        unavailableEquipment: result.unavailableEquipment || [],
+        note: result.provider === 'gemini'
+          ? 'Extracted via Google Gemini Flash with strict institutional catalogue grounding. Allocation availability is governed by FAIRALLOC.'
+          : 'Extracted via Institutional Deterministic Rule Engine. Allocation availability is governed by FAIRALLOC.'
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[AI Route Error]', err.message);
+    res.status(500).json({ success: false, error: 'Internal AI processing error.' });
   }
 });
 
