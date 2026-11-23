@@ -6,6 +6,7 @@ import equipmentRouter from './routes/equipment.js';
 import bookingsRouter from './routes/bookings.js';
 import aiRouter from './routes/ai.js';
 import analyticsRouter from './routes/analytics.js';
+import iotRouter from './routes/iot.js';
 import { store } from './services/store.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,6 +36,7 @@ app.use('/api/equipment', equipmentRouter);
 app.use('/api/bookings', bookingsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/iot', iotRouter);
 
 // Auxiliary Endpoints for Role Simulator
 app.get('/api/users', (req, res) => {

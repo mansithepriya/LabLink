@@ -73,6 +73,15 @@ const INITIAL_DATA = {
       priorUsageHoursMonth: 0
     },
     {
+      id: 'fac_3',
+      name: 'Dr. Sarah Jenkins',
+      email: 'sarah.jenkins@campus.edu',
+      role: 'faculty',
+      department: 'Robotics & Autonomous Systems',
+      certifications: ['ROBOTICS-SAFETY-1'],
+      priorUsageHoursMonth: 0
+    },
+    {
       id: 'admin_1',
       name: 'Central Lab Custodian Admin',
       email: 'labops@campus.edu',
@@ -218,6 +227,27 @@ const INITIAL_DATA = {
       status: 'maintenance', // Under maintenance
       operatingHours: { open: '08:00', close: '18:00', daysOfWeek: [1, 2, 3, 4, 5] },
       bufferTimeMinutes: 15
+    },
+    {
+      id: 'eq_8',
+      name: 'KUKA KR 6 Agilus 6-Axis Industrial Robotic Arm',
+      model: 'KR 6 R900-2',
+      department: 'Robotics & Autonomous Systems',
+      labRoom: 'Robo-Automation-112',
+      custodianFacultyId: 'fac_3',
+      category: 'robotics',
+      description: 'Precision 6-axis articulated robot with 6kg payload, 901mm reach, and sub-0.02mm repeatability for automated laboratory sample handling and pick-and-place testing.',
+      specifications: {
+        payload: '6 kg',
+        reach: '901 mm',
+        repeatability: '±0.02 mm',
+        degreesOfFreedom: 6,
+        controller: 'KR C4 compact'
+      },
+      safetyPrerequisites: ['ROBOTICS-SAFETY-1'],
+      status: 'operational',
+      operatingHours: { open: '08:00', close: '20:00', daysOfWeek: [1, 2, 3, 4, 5] },
+      bufferTimeMinutes: 20
     }
   ],
   maintenanceWindows: [
@@ -397,6 +427,36 @@ class Store {
     this.data.bookings[idx] = { ...this.data.bookings[idx], ...patch };
     this.saveToDisk();
     return this.data.bookings[idx];
+  }
+
+  updateEquipmentStatus(id, newStatus, reason = '') {
+    const eq = this.data.equipment.find(e => e.id === id);
+    if (!eq) return null;
+    const oldStatus = eq.status;
+    eq.status = newStatus;
+
+    // Connect equipment operational status directly with the booking system:
+    // When equipment is marked under maintenance, flag all confirmed bookings for review
+    if (newStatus === 'maintenance') {
+      for (const booking of this.data.bookings) {
+        if (booking.equipmentId === id && booking.status === 'confirmed') {
+          booking.affectedByMaintenance = true;
+          booking.maintenanceReviewNotice = reason || `Equipment ${eq.name} placed under maintenance. Operational inspection required.`;
+          booking.maintenanceTriggeredAt = new Date().toISOString();
+        }
+      }
+    } else if (newStatus === 'operational') {
+      // When restored to operational, restore booking eligibility and clear flags
+      for (const booking of this.data.bookings) {
+        if (booking.equipmentId === id && booking.affectedByMaintenance) {
+          booking.affectedByMaintenance = false;
+          booking.maintenanceResolvedAt = new Date().toISOString();
+        }
+      }
+    }
+
+    this.saveToDisk();
+    return { equipment: eq, previousStatus: oldStatus };
   }
 
   addProject(project) {

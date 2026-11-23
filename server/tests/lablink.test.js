@@ -349,4 +349,140 @@ describe('LABLINK Pre-Deployment Engineering Audit Test Suite', () => {
       expect(res.body.error).toContain('12 continuous hours');
     });
   });
+
+  describe('12. LABLINK IoT INTELLIGENCE & Hardware Telemetry Simulator', () => {
+    it('GET /api/iot/devices returns monitored nodes across CS, Electronics, Mechanical, and Robotics', async () => {
+      const res = await request(app).get('/api/iot/devices');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.isSimulated).toBe(true);
+      expect(res.body.disclaimer).toContain('SIMULATED DATA');
+
+      const depts = res.body.data.map(d => d.deptCategory);
+      expect(depts).toContain('electronics');
+      expect(depts).toContain('computer_science');
+      expect(depts).toContain('mechanical');
+      expect(depts).toContain('robotics');
+    });
+
+    it('each IoT device possesses required telemetry metrics, thresholds, and simulated tag', async () => {
+      const res = await request(app).get('/api/iot/devices/IOT-ECE-DSOX3014T-01');
+      expect(res.status).toBe(200);
+      const dev = res.body.data;
+      expect(dev.deviceId).toBe('IOT-ECE-DSOX3014T-01');
+      expect(dev.equipmentId).toBe('eq_1');
+      expect(dev.telemetry.isSimulated).toBe(true);
+      expect(typeof dev.telemetry.temperature).toBe('number');
+      expect(typeof dev.telemetry.powerWatts).toBe('number');
+      expect(typeof dev.telemetry.utilizationPercent).toBe('number');
+      expect(dev.thresholds.maxTemperature).toBe(65.0);
+      expect(dev.connectionStatus).toBe('online');
+    });
+
+    it('POST /api/iot/simulate-tick advances simulated telemetry with timestamp', async () => {
+      const res = await request(app).post('/api/iot/simulate-tick');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.isSimulated).toBe(true);
+      expect(res.body.timestamp).toBeDefined();
+      expect(res.body.devicesUpdated).toBeGreaterThanOrEqual(6);
+    });
+
+    it('POST /api/iot/pause and POST /api/iot/resume control simulation active state', async () => {
+      const pauseRes = await request(app).post('/api/iot/pause');
+      expect(pauseRes.status).toBe(200);
+      expect(pauseRes.body.isPaused).toBe(true);
+
+      const resumeRes = await request(app).post('/api/iot/resume');
+      expect(resumeRes.status).toBe(200);
+      expect(resumeRes.body.isPaused).toBe(false);
+    });
+
+    it('DEMO SCENARIO: Overheat alert triggers transparent rule warning on electronics workstation', async () => {
+      const res = await request(app).post('/api/iot/demo/overheat').send({ equipmentId: 'eq_1' });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.device.telemetry.temperature).toBe(74.8);
+
+      // Verify rule-based alert generated
+      const devRes = await request(app).get('/api/iot/devices/IOT-ECE-DSOX3014T-01');
+      expect(devRes.body.data.activeWarnings.length).toBeGreaterThan(0);
+      const warn = devRes.body.data.activeWarnings[0];
+      expect(warn.metric).toBe('temperature');
+      expect(warn.message).toContain('Over-temperature warning');
+      expect(warn.message).toContain('65');
+    });
+
+    it('RESOURCE INTEGRATION: Placing device under maintenance blocks new bookings & flags existing reservations', async () => {
+      // 1. Place Keysight Oscilloscope (eq_1) into maintenance via IoT monitor
+      const maintRes = await request(app)
+        .post('/api/iot/devices/IOT-ECE-DSOX3014T-01/maintenance')
+        .send({
+          isMaintenance: true,
+          reason: 'Emergency inspection: Simulated thermal limit exceeded (74.8°C).'
+        });
+      expect(maintRes.status).toBe(200);
+
+      // 2. Verify equipment status in core catalogue transitioned to maintenance
+      const eqRes = await request(app).get('/api/equipment/eq_1');
+      expect(eqRes.body.data.status).toBe('maintenance');
+
+      // 3. Verify existing confirmed booking on eq_1 is flagged with maintenance notice
+      const bookListRes = await request(app).get('/api/bookings?equipmentId=eq_1');
+      const existingBook = bookListRes.body.data.find(b => b.id === 'book_existing_1');
+      expect(existingBook.affectedByMaintenance).toBe(true);
+      expect(existingBook.maintenanceReviewNotice).toContain('thermal limit');
+
+      // 4. Verify attempting a new booking on eq_1 is BLOCKED with 422 EQUIPMENT_UNAVAILABLE
+      const attemptRes = await request(app).post('/api/bookings').send({
+        equipmentId: 'eq_1',
+        studentId: 'std_1',
+        projectId: 'proj_1',
+        requestedStartTime: '2026-11-26T10:00:00.000Z',
+        requestedEndTime: '2026-11-26T12:00:00.000Z',
+        purposeSummary: 'Booking attempt during thermal maintenance'
+      });
+      expect(attemptRes.status).toBe(422);
+      expect(attemptRes.body.code).toBe('EQUIPMENT_UNAVAILABLE');
+    });
+
+    it('RESOURCE INTEGRATION: Restoring equipment to operational status re-enables booking eligibility', async () => {
+      // 1. Resolve overheat and restore to operational
+      const restoreRes = await request(app).post('/api/iot/demo/resolve').send({ equipmentId: 'eq_1' });
+      expect(restoreRes.status).toBe(200);
+
+      // 2. Verify equipment status is operational
+      const eqRes = await request(app).get('/api/equipment/eq_1');
+      expect(eqRes.body.data.status).toBe('operational');
+
+      // 3. Verify booking is now allowed again
+      const newBookingRes = await request(app).post('/api/bookings').send({
+        equipmentId: 'eq_1',
+        studentId: 'std_1',
+        projectId: 'proj_1',
+        requestedStartTime: '2026-11-26T10:00:00.000Z',
+        requestedEndTime: '2026-11-26T12:00:00.000Z',
+        purposeSummary: 'Post-inspection verification session'
+      });
+      expect(newBookingRes.status).toBe(201);
+      expect(newBookingRes.body.success).toBe(true);
+      expect(newBookingRes.body.data.status).toBe('pending_faculty');
+    });
+
+    it('GET /api/iot/analytics returns aggregate fleet power, health distribution, and department utilization', async () => {
+      const res = await request(app).get('/api/iot/analytics');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.isSimulated).toBe(true);
+      expect(res.body.data.summary.totalMonitoredNodes).toBeGreaterThanOrEqual(6);
+      expect(typeof res.body.data.summary.totalPowerConsumptionKw).toBe('number');
+      expect(res.body.data.summary.healthDistribution).toHaveProperty('normal');
+      expect(res.body.data.summary.healthDistribution).toHaveProperty('warning');
+      expect(res.body.data.summary.healthDistribution).toHaveProperty('maintenance');
+
+      const depts = res.body.data.departmentUtilizationComparison;
+      expect(depts.length).toBe(4);
+      expect(depts.some(d => d.departmentCategory === 'robotics')).toBe(true);
+    });
+  });
 });

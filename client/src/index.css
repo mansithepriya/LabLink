@@ -222,6 +222,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   border: 1px solid var(--lime-400);
 }
 
+.badge-iot-simulated {
+  background-color: #EFF6FF;
+  color: #1E40AF;
+  border: 1px solid #BFDBFE;
+}
+
 /* Card Surfaces */
 .card {
   background-color: var(--bg-card);
@@ -286,6 +292,15 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .btn-danger:hover {
   background-color: #B91C1C;
+}
+
+.btn-amber {
+  background-color: #F59E0B;
+  color: #FFFFFF;
+}
+
+.btn-amber:hover {
+  background-color: #D97706;
 }
 
 /* Form Controls */
@@ -355,6 +370,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   height: 100%;
   background-color: var(--teal-600);
   border-radius: 4px;
+  transition: width 0.4s ease;
 }
 
 /* Status Notifications */
@@ -384,6 +400,44 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   background-color: #FEF2F2;
   border: 1px solid #FEE2E2;
   color: #991B1B;
+}
+
+.alert-info {
+  background-color: #EFF6FF;
+  border: 1px solid #DBEAFE;
+  color: #1E40AF;
+}
+
+/* Pulsing Live Simulation Dot */
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background-color: var(--lime-500);
+  border-radius: 50%;
+  display: inline-block;
+  animation: pulse 1.6s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(183, 228, 120, 0.7); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(183, 228, 120, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(183, 228, 120, 0); }
+}
+
+.paused-dot {
+  width: 8px;
+  height: 8px;
+  background-color: #94A3B8;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* IoT Gauge Metric Box */
+.gauge-box {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
 }
 
 /* Responsive adjustments */

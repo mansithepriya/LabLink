@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Compass,
   Sparkles,
@@ -19,17 +19,24 @@ import {
   Cpu,
   Microscope,
   Box,
-  Flame,
-  Radio
+  Radio,
+  Activity,
+  Zap,
+  Thermometer,
+  Wifi,
+  Wrench,
+  Play,
+  Pause,
+  AlertOctagon
 } from 'lucide-react';
 
 export default function App() {
   // Navigation & Role State
-  const [activeTab, setActiveTab] = useState('catalogue'); // catalogue | ai | bookings | faculty | analytics
+  const [activeTab, setActiveTab] = useState('catalogue'); // catalogue | ai | bookings | faculty | analytics | iot
   const [currentRole, setCurrentRole] = useState('student'); // student | faculty | admin
   const [currentStudentId, setCurrentStudentId] = useState('std_1');
 
-  // Data State
+  // Core Data State
   const [equipmentList, setEquipmentList] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
   const [projectsList, setProjectsList] = useState([]);
@@ -37,6 +44,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // IoT Intelligence State
+  const [iotDevices, setIotDevices] = useState([]);
+  const [iotAnalytics, setIotAnalytics] = useState(null);
+  const [iotDeptFilter, setIotDeptFilter] = useState('all');
+  const [simulationPaused, setSimulationPaused] = useState(false);
+  const [iotLastUpdated, setIotLastUpdated] = useState('');
+  const [iotLoading, setIotLoading] = useState(false);
+  const [demoActive, setDemoActive] = useState(false);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,16 +75,20 @@ export default function App() {
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [conflictResponse, setConflictResponse] = useState(null);
 
-  // Load Data
+  // Auto-refresh interval ref
+  const timerRef = useRef(null);
+
+  // Load Core Data
   const fetchData = async () => {
     try {
       setLoading(true);
       setErrorMsg('');
 
-      const [eqRes, bookRes, projRes] = await Promise.all([
+      const [eqRes, bookRes, projRes, anaRes] = await Promise.all([
         fetch('/api/equipment'),
         fetch('/api/bookings'),
-        fetch('/api/projects')
+        fetch('/api/projects'),
+        fetch('/api/analytics')
       ]);
 
       if (eqRes.ok) {
@@ -83,9 +103,6 @@ export default function App() {
         const projData = await projRes.json();
         setProjectsList(projData.data || []);
       }
-
-      // Fetch analytics
-      const anaRes = await fetch('/api/analytics');
       if (anaRes.ok) {
         const anaData = await anaRes.json();
         setAnalyticsData(anaData.data);
@@ -98,11 +115,157 @@ export default function App() {
     }
   };
 
+  // Load IoT Telemetry Data
+  const fetchIotData = async () => {
+    try {
+      const [devRes, anaRes] = await Promise.all([
+        fetch('/api/iot/devices'),
+        fetch('/api/iot/analytics')
+      ]);
+
+      if (devRes.ok) {
+        const devData = await devRes.json();
+        setIotDevices(devData.data || []);
+        setSimulationPaused(devData.simulationPaused || false);
+        setIotLastUpdated(new Date().toLocaleTimeString());
+        // Check if demo is currently active
+        const eceDev = devData.data?.find(d => d.equipmentId === 'eq_1');
+        setDemoActive(eceDev?.telemetry?.temperature > 65);
+      }
+      if (anaRes.ok) {
+        const anaData = await anaRes.json();
+        setIotAnalytics(anaData.data);
+      }
+    } catch (err) {
+      console.error('IoT Fetch error:', err);
+    }
+  };
+
+  // Initial load
   useEffect(() => {
     fetchData();
+    fetchIotData();
   }, []);
 
-  // Filtered Equipment List
+  // Periodic Telemetry Simulation Polling (every 4 seconds when active)
+  useEffect(() => {
+    if (activeTab === 'iot' && !simulationPaused) {
+      timerRef.current = setInterval(async () => {
+        // Trigger simulation tick and refresh
+        try {
+          await fetch('/api/iot/simulate-tick', { method: 'POST' });
+          fetchIotData();
+        } catch (e) {}
+      }, 4000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [activeTab, simulationPaused]);
+
+  // IoT Simulation Controls
+  const handleTickManual = async () => {
+    setIotLoading(true);
+    try {
+      await fetch('/api/iot/simulate-tick', { method: 'POST' });
+      await fetchIotData();
+      setSuccessMsg('Telemetry values refreshed.');
+    } catch (err) {
+      setErrorMsg('Failed to update telemetry values.');
+    } finally {
+      setIotLoading(false);
+    }
+  };
+
+  const handleToggleSimulationPause = async () => {
+    try {
+      const endpoint = simulationPaused ? '/api/iot/resume' : '/api/iot/pause';
+      const res = await fetch(endpoint, { method: 'POST' });
+      if (res.ok) {
+        setSimulationPaused(!simulationPaused);
+        setSuccessMsg(simulationPaused ? 'Telemetry simulation resumed.' : 'Telemetry simulation paused.');
+      }
+    } catch (err) {
+      setErrorMsg('Failed to toggle simulation state.');
+    }
+  };
+
+  // Demo Scenario: Trigger Electronics Overheat
+  const handleTriggerOverheatDemo = async () => {
+    try {
+      setIotLoading(true);
+      const res = await fetch('/api/iot/demo/overheat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ equipmentId: 'eq_1' })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchIotData();
+        setDemoActive(true);
+        setSuccessMsg('Demo Active: Keysight Oscilloscope simulated temperature spiked to 74.8°C! Rule-based thermal warning generated.');
+      }
+    } catch (err) {
+      setErrorMsg('Failed to trigger overheat demo.');
+    } finally {
+      setIotLoading(false);
+    }
+  };
+
+  // Demo Scenario: Resolve Overheat
+  const handleResolveOverheatDemo = async () => {
+    try {
+      setIotLoading(true);
+      const res = await fetch('/api/iot/demo/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ equipmentId: 'eq_1' })
+      });
+      if (res.ok) {
+        await fetchIotData();
+        await fetchData(); // refresh equipment status
+        setDemoActive(false);
+        setSuccessMsg('Demo Resolved: Thermal telemetry returned to nominal 41.2°C. Warnings cleared and equipment restored to operational.');
+      }
+    } catch (err) {
+      setErrorMsg('Failed to resolve overheat demo.');
+    } finally {
+      setIotLoading(false);
+    }
+  };
+
+  // Toggle Equipment Maintenance from IoT Intelligence
+  const handleToggleDeviceMaintenance = async (deviceId, isMaintenance) => {
+    try {
+      setIotLoading(true);
+      const res = await fetch(`/api/iot/devices/${deviceId}/maintenance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isMaintenance,
+          reason: isMaintenance ? 'Emergency maintenance triggered by IoT thermal warning.' : 'Maintenance resolved; telemetry verified safe.'
+        })
+      });
+
+      if (res.ok) {
+        await fetchIotData();
+        await fetchData(); // Refresh booking & equipment data
+        setSuccessMsg(isMaintenance 
+          ? 'Equipment placed under MAINTENANCE. All new bookings blocked; confirmed reservations flagged for review.'
+          : 'Equipment restored to OPERATIONAL. Booking eligibility restored.'
+        );
+      }
+    } catch (err) {
+      setErrorMsg('Failed to update maintenance state.');
+    } finally {
+      setIotLoading(false);
+    }
+  };
+
+  // Filtered Equipment List for Catalogue
   const filteredEquipment = equipmentList.filter(eq => {
     const matchesSearch = !searchQuery ||
       eq.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -114,6 +277,12 @@ export default function App() {
     const matchesStatus = selectedStatus === 'all' || eq.status === selectedStatus;
 
     return matchesSearch && matchesDept && matchesStatus;
+  });
+
+  // Filtered IoT Devices
+  const filteredIotDevices = iotDevices.filter(dev => {
+    if (iotDeptFilter === 'all') return true;
+    return dev.deptCategory === iotDeptFilter;
   });
 
   // Handle AI Matching
@@ -240,11 +409,21 @@ export default function App() {
 
   const getCategoryIcon = (category) => {
     switch (category) {
-      case 'rf_microwave': return <Radio size={18} className="text-teal-600" />;
-      case 'microscopy': return <Microscope size={18} className="text-teal-600" />;
-      case 'compute_gpu': return <Cpu size={18} className="text-teal-600" />;
-      case 'prototyping': return <Box size={18} className="text-teal-600" />;
-      default: return <Layers size={18} className="text-teal-600" />;
+      case 'rf_microwave':
+      case 'electronics':
+        return <Radio size={18} className="text-teal-600" />;
+      case 'microscopy':
+        return <Microscope size={18} className="text-teal-600" />;
+      case 'compute_gpu':
+      case 'computer_science':
+        return <Cpu size={18} className="text-teal-600" />;
+      case 'prototyping':
+      case 'mechanical':
+        return <Box size={18} className="text-teal-600" />;
+      case 'robotics':
+        return <Wrench size={18} className="text-teal-600" />;
+      default:
+        return <Layers size={18} className="text-teal-600" />;
     }
   };
 
@@ -257,7 +436,7 @@ export default function App() {
             <span className="logo-badge">LABLINK</span>
             <div>
               <h1 className="logo-text">Intelligent Laboratory Network</h1>
-              <p style={{ fontSize: '0.75rem', color: '#CBD5E1' }}>Fair & Feasible Cross-Departmental Allocation</p>
+              <p style={{ fontSize: '0.75rem', color: '#CBD5E1' }}>Fair Allocation & IoT Hardware Telemetry Intelligence</p>
             </div>
           </div>
 
@@ -282,6 +461,13 @@ export default function App() {
               aria-current={activeTab === 'bookings' ? 'page' : undefined}
             >
               <Calendar size={16} /> FAIRALLOC Bookings
+            </button>
+            <button
+              onClick={() => setActiveTab('iot')}
+              className={`nav-btn ${activeTab === 'iot' ? 'active' : ''}`}
+              aria-current={activeTab === 'iot' ? 'page' : undefined}
+            >
+              <Activity size={16} /> IoT Intelligence
             </button>
             <button
               onClick={() => setActiveTab('faculty')}
@@ -340,6 +526,385 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB: IOT INTELLIGENCE */}
+        {activeTab === 'iot' && (
+          <div>
+            {/* Header & Transparency Notice */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                  <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--forest-800)' }}>
+                    LabLink IoT Intelligence & Telemetry
+                  </h2>
+                  <span className="badge badge-iot-simulated">
+                    SIMULATED DATA
+                  </span>
+                </div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  Live simulated sensor network monitoring thermal load, power draw, and mechanical stability across laboratory equipment.
+                </p>
+              </div>
+
+              {/* Simulation Status & Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', background: '#FFFFFF', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+                  <span className={simulationPaused ? 'paused-dot' : 'pulse-dot'}></span>
+                  <span style={{ fontWeight: 600 }}>
+                    {simulationPaused ? 'Simulation Paused' : 'Live Simulation (4s Tick)'}
+                  </span>
+                  {iotLastUpdated && (
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>({iotLastUpdated})</span>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleToggleSimulationPause}
+                  className="btn btn-outline"
+                  style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
+                  aria-label={simulationPaused ? 'Resume Simulation' : 'Pause Simulation'}
+                >
+                  {simulationPaused ? <Play size={14} /> : <Pause size={14} />}
+                  {simulationPaused ? 'Resume' : 'Pause'}
+                </button>
+
+                <button
+                  onClick={handleTickManual}
+                  disabled={iotLoading}
+                  className="btn btn-outline"
+                  style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
+                  aria-label="Force Telemetry Update"
+                >
+                  <RefreshCw size={14} className={iotLoading ? 'spin' : ''} /> Force Update
+                </button>
+              </div>
+            </div>
+
+            {/* Prominent Simulated Data Notice */}
+            <div className="alert alert-info" style={{ marginBottom: '1.5rem', padding: '0.85rem 1.25rem' }}>
+              <Info size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong>SIMULATED DATA NOTICE:</strong> All telemetry values (temperatures, power consumption in watts, and vibration readings) are software-simulated. No physical IoT hardware is connected. Health evaluation uses transparent, rule-based thresholds (no predictive black-box ML).
+              </div>
+            </div>
+
+            {/* DEMO SCENARIO CONTROL CARD */}
+            <div className="card" style={{ marginBottom: '1.5rem', background: demoActive ? '#FFFBEB' : '#F9FAF8', border: demoActive ? '1px solid #F59E0B' : '1px solid #D5E2DC' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <Flame size={18} style={{ color: demoActive ? '#D97706' : 'var(--forest-800)' }} />
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: demoActive ? '#92400E' : 'var(--forest-900)' }}>
+                      Demonstration Scenario: Electronics Workstation Thermal Alert & Booking Lockout
+                    </h3>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Simulates an over-temperature condition on the Keysight DSOX3014T Oscilloscope (RF Bench), triggering rule-based warnings and demonstrating how LabLink connects IoT health to booking eligibility.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {!demoActive ? (
+                    <button
+                      onClick={handleTriggerOverheatDemo}
+                      disabled={iotLoading}
+                      className="btn btn-amber"
+                      style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+                    >
+                      <Flame size={16} /> Trigger Overheat Demo (74.8°C)
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleResolveOverheatDemo}
+                      disabled={iotLoading}
+                      className="btn btn-lime"
+                      style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+                    >
+                      <CheckCircle2 size={16} /> Resolve Overheat & Restore (41.2°C)
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* IoT Fleet Macro Metrics */}
+            {iotAnalytics && (
+              <div className="grid-4" style={{ marginBottom: '1.5rem' }}>
+                <div className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
+                    <Wifi size={16} /> MONITORED NODES
+                  </div>
+                  <p style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--forest-900)' }}>
+                    {iotAnalytics.summary?.totalMonitoredNodes}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--status-operational)' }}>
+                    Across 4 Departments
+                  </p>
+                </div>
+
+                <div className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
+                    <Zap size={16} /> TOTAL POWER LOAD
+                  </div>
+                  <p style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--teal-600)' }}>
+                    {iotAnalytics.summary?.totalPowerConsumptionKw} kW
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Aggregate Simulated Draw
+                  </p>
+                </div>
+
+                <div className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
+                    <AlertTriangle size={16} /> ACTIVE WARNINGS
+                  </div>
+                  <p style={{ fontSize: '1.8rem', fontWeight: 800, color: iotAnalytics.summary?.totalActiveWarnings > 0 ? '#DC2626' : 'var(--status-operational)' }}>
+                    {iotAnalytics.summary?.totalActiveWarnings}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Rule-Based Threshold Alerts
+                  </p>
+                </div>
+
+                <div className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
+                    <Shield size={16} /> FLEET HEALTH
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.8rem' }}>
+                    <span className="badge badge-operational">{iotAnalytics.summary?.healthDistribution?.normal} Normal</span>
+                    {iotAnalytics.summary?.healthDistribution?.warning > 0 && (
+                      <span className="badge badge-conflict">{iotAnalytics.summary?.healthDistribution?.warning} Alert</span>
+                    )}
+                    <span className="badge badge-maintenance">{iotAnalytics.summary?.healthDistribution?.maintenance} Maint</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Department Filter Pills */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+              {[
+                { id: 'all', label: 'All Departments' },
+                { id: 'electronics', label: 'Electronics & RF' },
+                { id: 'computer_science', label: 'Computer Science & AI' },
+                { id: 'mechanical', label: 'Mechanical Engineering' },
+                { id: 'robotics', label: 'Robotics & Automation' }
+              ].map(d => (
+                <button
+                  key={d.id}
+                  onClick={() => setIotDeptFilter(d.id)}
+                  className={`btn ${iotDeptFilter === d.id ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Device Monitoring Cards Grid */}
+            <div className="grid-3" style={{ marginBottom: '2rem' }}>
+              {filteredIotDevices.map((dev) => {
+                const temp = dev.telemetry.temperature;
+                const maxTemp = dev.thresholds.maxTemperature;
+                const isOverTemp = temp > maxTemp;
+                const isNearTemp = temp > maxTemp * 0.85 && !isOverTemp;
+                const isUnderMaintenance = dev.operationalState === 'maintenance';
+                const hasWarnings = dev.activeWarnings && dev.activeWarnings.length > 0;
+
+                return (
+                  <div
+                    key={dev.deviceId}
+                    className="card"
+                    style={{
+                      borderLeft: isUnderMaintenance 
+                        ? '4px solid #F59E0B' 
+                        : (hasWarnings ? '4px solid #DC2626' : '4px solid #10B981'),
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      {/* Top Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.2rem' }}>
+                            {getCategoryIcon(dev.deptCategory)}
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                              {dev.deviceId}
+                            </span>
+                          </div>
+                          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--forest-900)' }}>
+                            {dev.name}
+                          </h3>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {dev.department} â€¢ {dev.labRoom}
+                          </p>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                          <span className={`badge ${dev.connectionStatus === 'online' ? 'badge-operational' : 'badge-maintenance'}`}>
+                            {dev.connectionStatus.toUpperCase()}
+                          </span>
+                          <span className={`badge ${isUnderMaintenance ? 'badge-maintenance' : (dev.operationalState === 'active' ? 'badge-fairalloc' : 'badge-operational')}`}>
+                            {dev.operationalState.toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Rule-Based Alert Warning Banner */}
+                      {hasWarnings && (
+                        <div className="alert alert-error" style={{ padding: '0.65rem 0.85rem', fontSize: '0.8rem', marginBottom: '0.85rem', display: 'block' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                            <AlertOctagon size={16} /> Rule-Based Alert Triggered:
+                          </div>
+                          <ul style={{ paddingLeft: '1.25rem' }}>
+                            {dev.activeWarnings.map((w, idx) => (
+                              <li key={idx}>{w.message}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Telemetry Sensor Readings Grid */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+                        {/* Temperature */}
+                        <div className="gauge-box">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <Thermometer size={14} /> Temp
+                            </span>
+                            <span style={{ fontWeight: 700, color: isOverTemp ? '#DC2626' : (isNearTemp ? '#D97706' : 'var(--forest-800)') }}>
+                              {temp}°C
+                            </span>
+                          </div>
+                          <div className="metric-bar">
+                            <div
+                              className="metric-fill"
+                              style={{
+                                width: `${Math.min(100, (temp / maxTemp) * 100)}%`,
+                                backgroundColor: isOverTemp ? '#DC2626' : (isNearTemp ? '#F59E0B' : '#10B981')
+                              }}
+                            />
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                            Limit: {maxTemp}°C
+                          </div>
+                        </div>
+
+                        {/* Power Consumption */}
+                        <div className="gauge-box">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <Zap size={14} /> Power
+                            </span>
+                            <span style={{ fontWeight: 700, color: 'var(--forest-800)' }}>
+                              {dev.telemetry.powerWatts} W
+                            </span>
+                          </div>
+                          <div className="metric-bar">
+                            <div
+                              className="metric-fill"
+                              style={{
+                                width: `${Math.min(100, (dev.telemetry.powerWatts / dev.thresholds.maxPowerWatts) * 100)}%`,
+                                backgroundColor: dev.telemetry.powerWatts > dev.thresholds.maxPowerWatts ? '#DC2626' : 'var(--teal-600)'
+                              }}
+                            />
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                            Limit: {dev.thresholds.maxPowerWatts} W
+                          </div>
+                        </div>
+
+                        {/* Utilization */}
+                        <div className="gauge-box">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <Activity size={14} /> Util
+                            </span>
+                            <span style={{ fontWeight: 700, color: 'var(--forest-800)' }}>
+                              {dev.telemetry.utilizationPercent}%
+                            </span>
+                          </div>
+                          <div className="metric-bar">
+                            <div className="metric-fill" style={{ width: `${dev.telemetry.utilizationPercent}%` }} />
+                          </div>
+                        </div>
+
+                        {/* Vibration / Jitter */}
+                        <div className="gauge-box">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <Shield size={14} /> Stability
+                            </span>
+                            <span style={{ fontWeight: 700, color: 'var(--forest-800)' }}>
+                              {dev.telemetry.vibrationMmS} mm/s
+                            </span>
+                          </div>
+                          <div className="metric-bar">
+                            <div className="metric-fill" style={{ width: `${Math.min(100, (dev.telemetry.vibrationMmS / dev.thresholds.maxVibrationMmS) * 100)}%` }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Last Update: {new Date(dev.telemetry.lastUpdated).toLocaleTimeString()}</span>
+                        <span style={{ fontStyle: 'italic' }}>Simulated Value</span>
+                      </div>
+                    </div>
+
+                    {/* Custodian Maintenance Control */}
+                    <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
+                      {!isUnderMaintenance ? (
+                        <button
+                          onClick={() => handleToggleDeviceMaintenance(dev.deviceId, true)}
+                          className="btn btn-outline"
+                          style={{ width: '100%', fontSize: '0.8rem', padding: '0.4rem 0.65rem' }}
+                        >
+                          <Wrench size={14} /> Set Maintenance (Block Bookings)
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleDeviceMaintenance(dev.deviceId, false)}
+                          className="btn btn-lime"
+                          style={{ width: '100%', fontSize: '0.8rem', padding: '0.4rem 0.65rem' }}
+                        >
+                          <CheckCircle2 size={14} /> Restore Operational Status
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Department Utilization Comparison Chart */}
+            {iotAnalytics?.departmentUtilizationComparison && (
+              <div className="card">
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--forest-800)' }}>
+                  Department-Level Equipment Utilization Comparison
+                </h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                  Aggregated telemetry utilization across active campus laboratory workstations.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  {iotAnalytics.departmentUtilizationComparison.map((dept) => (
+                    <div key={dept.departmentCategory}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                        <span style={{ fontWeight: 600 }}>{dept.displayName} ({dept.monitoredNodes} Nodes)</span>
+                        <span style={{ fontWeight: 700, color: 'var(--forest-800)' }}>{dept.averageUtilizationPercent}%</span>
+                      </div>
+                      <div className="metric-bar" style={{ height: '10px' }}>
+                        <div className="metric-fill" style={{ width: `${dept.averageUtilizationPercent}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB 1: EQUIPMENT CATALOGUE */}
         {activeTab === 'catalogue' && (
           <div>
@@ -383,6 +948,7 @@ export default function App() {
                     <option value="Materials & Nanotechnology">Materials & Nano</option>
                     <option value="Computer Science & AI">CS & AI</option>
                     <option value="Mechanical Engineering">Mechanical Eng</option>
+                    <option value="Robotics & Autonomous Systems">Robotics</option>
                     <option value="Bioengineering">Bioengineering</option>
                   </select>
                 </div>
@@ -518,7 +1084,29 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                      onClick={() => {
+                        setAiTitle('High-Speed GaN Power Inverter Characterization');
+                        setAiDesc('Need to capture fast 500 kHz switching transients and gate drive ringing requiring 1 GHz bandwidth and 4 channels.');
+                      }}
+                    >
+                      Preset: RF / Power
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                      onClick={() => {
+                        setAiTitle('Robotic Automated Sample Pipetting System');
+                        setAiDesc('Requires precision 6-axis articulated robot with sub-millimeter repeatability and automated sample trajectory handling.');
+                      }}
+                    >
+                      Preset: Robotics
+                    </button>
                     <button
                       type="button"
                       className="btn btn-outline"
@@ -529,17 +1117,6 @@ export default function App() {
                       }}
                     >
                       Preset: Bio-Imaging
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline"
-                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-                      onClick={() => {
-                        setAiTitle('High-Resolution SEM Surface Topology for Thin Films');
-                        setAiDesc('Requires field emission scanning electron microscope with EDX elemental spectrometer and ultra-high vacuum chamber up to 30 kV accelerating voltage.');
-                      }}
-                    >
-                      Preset: Nanotech SEM
                     </button>
                   </div>
 
@@ -681,6 +1258,12 @@ export default function App() {
                             <span className={`badge ${isConfirmed ? 'badge-operational' : (isRejected ? 'badge-conflict' : 'badge-maintenance')}`}>
                               {booking.status.replace('_', ' ').toUpperCase()}
                             </span>
+                            {/* Maintenance Notice Flag */}
+                            {booking.affectedByMaintenance && (
+                              <span className="badge badge-conflict">
+                                âš ï¸ AFFECTED BY MAINTENANCE
+                              </span>
+                            )}
                           </div>
                           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--forest-900)' }}>
                             {eq?.name || booking.equipmentId}
@@ -701,6 +1284,16 @@ export default function App() {
                           </p>
                         </div>
                       </div>
+
+                      {/* Maintenance Warning Banner if equipment went down */}
+                      {booking.affectedByMaintenance && (
+                        <div className="alert alert-error" style={{ fontSize: '0.85rem', padding: '0.65rem 0.85rem', marginBottom: '0.75rem' }}>
+                          <AlertOctagon size={16} />
+                          <div>
+                            <strong>Maintenance Impact Alert:</strong> {booking.maintenanceReviewNotice || 'This equipment is currently under maintenance. A lab manager is inspecting the unit.'}
+                          </div>
+                        </div>
+                      )}
 
                       {/* FAIRALLOC Scoring Breakdown */}
                       {meta && (

@@ -82,6 +82,17 @@
       "priorUsageHoursMonth": 0
     },
     {
+      "id": "fac_3",
+      "name": "Dr. Sarah Jenkins",
+      "email": "sarah.jenkins@campus.edu",
+      "role": "faculty",
+      "department": "Robotics & Autonomous Systems",
+      "certifications": [
+        "ROBOTICS-SAFETY-1"
+      ],
+      "priorUsageHoursMonth": 0
+    },
+    {
       "id": "admin_1",
       "name": "Central Lab Custodian Admin",
       "email": "labops@campus.edu",
@@ -334,6 +345,39 @@
         ]
       },
       "bufferTimeMinutes": 15
+    },
+    {
+      "id": "eq_8",
+      "name": "KUKA KR 6 Agilus 6-Axis Industrial Robotic Arm",
+      "model": "KR 6 R900-2",
+      "department": "Robotics & Autonomous Systems",
+      "labRoom": "Robo-Automation-112",
+      "custodianFacultyId": "fac_3",
+      "category": "robotics",
+      "description": "Precision 6-axis articulated robot with 6kg payload, 901mm reach, and sub-0.02mm repeatability for automated laboratory sample handling and pick-and-place testing.",
+      "specifications": {
+        "payload": "6 kg",
+        "reach": "901 mm",
+        "repeatability": "±0.02 mm",
+        "degreesOfFreedom": 6,
+        "controller": "KR C4 compact"
+      },
+      "safetyPrerequisites": [
+        "ROBOTICS-SAFETY-1"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "08:00",
+        "close": "20:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "bufferTimeMinutes": 20
     }
   ],
   "maintenanceWindows": [
