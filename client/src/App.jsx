@@ -27,7 +27,9 @@ import {
   Wrench,
   Play,
   Pause,
-  AlertOctagon
+  AlertOctagon,
+  ExternalLink,
+  Download
 } from 'lucide-react';
 
 export default function App() {
@@ -405,6 +407,43 @@ export default function App() {
     }
     setConflictResponse(null);
     setSuccessMsg('Feasible alternative slot applied. Click Submit to reserve.');
+  };
+
+  // Calendar Connect: Open prefilled Google Calendar URL
+  const handleAddToGoogleCalendar = async (booking) => {
+    try {
+      setErrorMsg('');
+      const res = await fetch(`/api/bookings/${booking.id}/calendar`);
+      const data = await res.json();
+      if (res.ok && data.data?.googleCalendarUrl) {
+        window.open(data.data.googleCalendarUrl, '_blank', 'noopener,noreferrer');
+        setSuccessMsg(`Google Calendar event generated for ${booking.id}. Review and save in your personal calendar (Asia/Kolkata).`);
+      } else {
+        setErrorMsg(data.error || 'Cannot export unconfirmed reservation to calendar.');
+      }
+    } catch (err) {
+      setErrorMsg('Failed to generate Google Calendar event link.');
+    }
+  };
+
+  // Cancel Booking
+  const handleCancelBooking = async (bookingId) => {
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Cancelled by student in portal' })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMsg(`Reservation ${bookingId} has been cancelled. Calendar synchronization disabled.`);
+        fetchData();
+      } else {
+        setErrorMsg(data.error || 'Failed to cancel booking.');
+      }
+    } catch (err) {
+      setErrorMsg('Error submitting cancellation request.');
+    }
   };
 
   const getCategoryIcon = (category) => {
@@ -1359,6 +1398,73 @@ export default function App() {
                       {booking.facultyEndorsement && (
                         <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', background: '#F8FAFC', padding: '0.5rem 0.75rem', borderRadius: '4px', borderLeft: `3px solid ${isConfirmed ? '#166534' : '#991B1B'}` }}>
                           <strong>Faculty Supervisor Note:</strong> {booking.facultyEndorsement.note} (Endorsed at {new Date(booking.facultyEndorsement.endorsedAt).toLocaleTimeString()})
+                        </div>
+                      )}
+
+                      {/* LABLINK CALENDAR CONNECT PANEL (Confirmed Bookings Only) */}
+                      {isConfirmed && (
+                        <div style={{ marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Calendar size={16} style={{ color: 'var(--teal-600)' }} />
+                            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--forest-800)' }}>
+                              Calendar Connect:
+                            </span>
+                            <span className="badge badge-fairalloc" style={{ fontSize: '0.7rem' }}>
+                              Asia/Kolkata (IST)
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => handleAddToGoogleCalendar(booking)}
+                              className="btn btn-outline"
+                              style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                              title="Add this confirmed reservation to Google Calendar"
+                            >
+                              <ExternalLink size={14} /> Add to Google Calendar
+                            </button>
+
+                            <a
+                              href={`/api/bookings/${booking.id}/calendar.ics`}
+                              download={`lablink-booking-${booking.id}.ics`}
+                              className="btn btn-primary"
+                              style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', textDecoration: 'none' }}
+                              title="Download RFC 5545 iCalendar (.ics) file"
+                            >
+                              <Download size={14} /> Download .ICS
+                            </a>
+
+                            <button
+                              onClick={() => handleCancelBooking(booking.id)}
+                              className="btn btn-outline"
+                              style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem', color: '#B91C1C', borderColor: '#FECACA' }}
+                              title="Cancel this reservation"
+                            >
+                              Cancel Slot
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Status Notices for Unconfirmed or Cancelled Bookings */}
+                      {isPending && (
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#F8FAFC', padding: '0.4rem 0.6rem', borderRadius: '4px' }}>
+                          <Clock size={14} />
+                          <span>Calendar export will unlock automatically once your faculty supervisor approves this reservation.</span>
+                        </div>
+                      )}
+
+                      {isRejected && (
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#991B1B', display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#FEF2F2', padding: '0.4rem 0.6rem', borderRadius: '4px' }}>
+                          <XCircle size={14} />
+                          <span>Reservation rejected by supervisor. Calendar export is disabled.</span>
+                        </div>
+                      )}
+
+                      {booking.status === 'cancelled' && (
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#F1F5F9', padding: '0.4rem 0.6rem', borderRadius: '4px' }}>
+                          <XCircle size={14} />
+                          <span>Reservation cancelled ({booking.cancellationReason || 'by requester'}). Removed from active campus laboratory calendar.</span>
                         </div>
                       )}
                     </div>

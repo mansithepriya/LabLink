@@ -1,6 +1,7 @@
 import express from 'express';
 import { store } from '../services/store.js';
 import { FairAllocEngine } from '../services/fairalloc.js';
+import { CalendarConnectService } from '../services/calendarConnect.js';
 
 const router = express.Router();
 
@@ -257,6 +258,100 @@ router.post('/:id/endorse', (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/bookings/:id/cancel - Student or admin cancels a booking
+router.post('/:id/cancel', (req, res) => {
+  try {
+    const booking = store.getBookingById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    const updated = store.updateBooking(booking.id, {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString(),
+      cancellationReason: req.body.reason || 'Cancelled by requester'
+    });
+
+    res.json({
+      success: true,
+      message: 'Booking cancelled successfully. Calendar synchronization disabled.',
+      data: updated
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/bookings/:id/calendar - Retrieve Google Calendar URL & metadata
+router.get('/:id/calendar', (req, res) => {
+  try {
+    const booking = store.getBookingById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    const equipment = store.getEquipmentById(booking.equipmentId);
+    const project = store.getProjectById(booking.projectId);
+
+    // Validate confirmation status and dates
+    const validation = CalendarConnectService.validateBookingForExport(booking, equipment, project);
+    if (!validation.valid) {
+      return res.status(validation.statusCode).json({
+        success: false,
+        error: validation.error,
+        currentStatus: validation.currentStatus
+      });
+    }
+
+    const googleUrl = CalendarConnectService.generateGoogleCalendarUrl(booking, equipment, project);
+    const icsDownloadUrl = `/api/bookings/${booking.id}/calendar.ics`;
+
+    res.json({
+      success: true,
+      data: {
+        bookingId: booking.id,
+        status: booking.status,
+        equipmentName: equipment?.name,
+        labRoom: equipment?.labRoom,
+        department: equipment?.department,
+        timezone: 'Asia/Kolkata',
+        startTime: booking.requestedStartTime,
+        endTime: booking.requestedEndTime,
+        googleCalendarUrl: googleUrl,
+        icsDownloadUrl: icsDownloadUrl
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/bookings/:id/calendar.ics - Download RFC 5545 .ics file
+router.get('/:id/calendar.ics', (req, res) => {
+  try {
+    const booking = store.getBookingById(req.params.id);
+    if (!booking) {
+      return res.status(404).send('Booking not found');
+    }
+
+    const equipment = store.getEquipmentById(booking.equipmentId);
+    const project = store.getProjectById(booking.projectId);
+
+    const validation = CalendarConnectService.validateBookingForExport(booking, equipment, project);
+    if (!validation.valid) {
+      return res.status(validation.statusCode).send(validation.error);
+    }
+
+    const icsString = CalendarConnectService.generateIcsContent(booking, equipment, project);
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="lablink-booking-${booking.id}.ics"`);
+    res.send(icsString);
+  } catch (err) {
+    res.status(500).send(`Calendar generation error: ${err.message}`);
   }
 });
 

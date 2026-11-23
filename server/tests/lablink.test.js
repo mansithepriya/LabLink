@@ -3,6 +3,7 @@ import { testClient } from './testHelper.js';
 import app from '../app.js';
 import { store } from '../services/store.js';
 import { FairAllocEngine } from '../services/fairalloc.js';
+import { CalendarConnectService } from '../services/calendarConnect.js';
 
 const request = testClient;
 
@@ -483,6 +484,116 @@ describe('LABLINK Pre-Deployment Engineering Audit Test Suite', () => {
       const depts = res.body.data.departmentUtilizationComparison;
       expect(depts.length).toBe(4);
       expect(depts.some(d => d.departmentCategory === 'robotics')).toBe(true);
+    });
+  });
+
+  describe('13. LABLINK CALENDAR CONNECT: Google Calendar & RFC 5545 ICS Export', () => {
+    it('generates valid Google Calendar URL with Asia/Kolkata timezone and prefilled details for confirmed booking', async () => {
+      // book_existing_1 is confirmed: 2026-11-24T10:00:00.000Z to 2026-11-24T12:00:00.000Z
+      const res = await request(app).get('/api/bookings/book_existing_1/calendar');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+
+      const data = res.body.data;
+      expect(data.timezone).toBe('Asia/Kolkata');
+      expect(data.equipmentName).toContain('Keysight');
+      expect(data.googleCalendarUrl).toContain('calendar.google.com/calendar/render?action=TEMPLATE');
+      expect(data.googleCalendarUrl).toContain('20261124T100000Z%2F20261124T120000Z');
+      expect(data.googleCalendarUrl).toContain('ctz=Asia%2FKolkata');
+      expect(data.googleCalendarUrl).toContain('ECE-RF-204');
+    });
+
+    it('generates RFC 5545 compliant .ics file with CRLF endings and Asia/Kolkata timezone', async () => {
+      const res = await request(app).get('/api/bookings/book_existing_1/calendar.ics');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/calendar');
+      expect(res.headers['content-disposition']).toContain('attachment');
+      expect(res.headers['content-disposition']).toContain('lablink-booking-book_existing_1.ics');
+
+      const ics = res.body;
+      expect(ics).toContain('BEGIN:VCALENDAR');
+      expect(ics).toContain('VERSION:2.0');
+      expect(ics).toContain('PRODID:-//LabLink//Intelligent Laboratory Resource Network//EN');
+      expect(ics).toContain('TZID:Asia/Kolkata');
+      expect(ics).toContain('UID:book_existing_1@lablink.campus.edu');
+      expect(ics).toContain('DTSTART:20261124T100000Z');
+      expect(ics).toContain('DTEND:20261124T120000Z');
+      expect(ics).toContain('STATUS:CONFIRMED');
+      expect(ics).toContain('END:VEVENT');
+      expect(ics).toContain('END:VCALENDAR');
+
+      // Verify strict RFC 5545 CRLF line endings
+      expect(ics.includes('\r\n')).toBe(true);
+    });
+
+    it('blocks calendar export for unconfirmed (pending_faculty) bookings with 422 Unprocessable Entity', async () => {
+      // Create a pending booking
+      const pendingBooking = store.addBooking({
+        id: 'book_pending_cal_test',
+        projectId: 'proj_1',
+        studentId: 'std_1',
+        equipmentId: 'eq_1',
+        requestedStartTime: '2026-11-28T10:00:00.000Z',
+        requestedEndTime: '2026-11-28T12:00:00.000Z',
+        purposeSummary: 'Test pending calendar gate',
+        status: 'pending_faculty'
+      });
+
+      const res = await request(app).get(`/api/bookings/${pendingBooking.id}/calendar`);
+      expect(res.status).toBe(422);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('awaiting faculty supervisor endorsement');
+    });
+
+    it('blocks calendar export for rejected bookings with 422', async () => {
+      const rejectedBooking = store.addBooking({
+        id: 'book_rejected_cal_test',
+        projectId: 'proj_1',
+        studentId: 'std_1',
+        equipmentId: 'eq_1',
+        requestedStartTime: '2026-11-28T14:00:00.000Z',
+        requestedEndTime: '2026-11-28T16:00:00.000Z',
+        purposeSummary: 'Test rejected calendar gate',
+        status: 'rejected'
+      });
+
+      const res = await request(app).get(`/api/bookings/${rejectedBooking.id}/calendar`);
+      expect(res.status).toBe(422);
+      expect(res.body.error).toContain('rejected by faculty');
+    });
+
+    it('cancelling a booking sets status to cancelled and disables calendar export', async () => {
+      // Cancel book_existing_1
+      const cancelRes = await request(app)
+        .post('/api/bookings/book_existing_1/cancel')
+        .send({ reason: 'Student completed experiment ahead of schedule' });
+
+      expect(cancelRes.status).toBe(200);
+      expect(cancelRes.body.data.status).toBe('cancelled');
+
+      // Attempting to export cancelled booking must fail with 422
+      const calRes = await request(app).get('/api/bookings/book_existing_1/calendar');
+      expect(calRes.status).toBe(422);
+      expect(calRes.body.error).toContain('cancelled');
+    });
+
+    it('rejects booking with missing or corrupt dates with 400 Bad Request', () => {
+      const corruptBooking = {
+        id: 'book_corrupt',
+        status: 'confirmed',
+        requestedStartTime: 'invalid-date',
+        requestedEndTime: '2026-11-24T12:00:00.000Z'
+      };
+
+      const validation = CalendarConnectService.validateBookingForExport(corruptBooking, {}, {});
+      expect(validation.valid).toBe(false);
+      expect(validation.statusCode).toBe(400);
+    });
+
+    it('properly escapes special characters (commas, semicolons, backslashes, newlines) in .ics export', () => {
+      const textWithSpecialChars = 'GaN modules, tests; with \\backslashes\\ and\nnew lines.';
+      const escaped = CalendarConnectService.escapeIcsText(textWithSpecialChars);
+      expect(escaped).toBe('GaN modules\\, tests\\; with \\\\backslashes\\\\ and\\nnew lines.');
     });
   });
 });
