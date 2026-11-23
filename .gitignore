@@ -19,6 +19,21 @@ build/
 .env.production.local
 *.key
 *.pem
+# All environment files except the example template
+.env.*
+!.env.example
+
+# Google OAuth and service-account credentials
+credentials.json
+client_secret*.json
+service-account*.json
+*service-account*.json
+
+# Token vaults and local databases
+server/data/*vault*.json
+server/data/*.db
+server/data/*.sqlite
+server/data/*.sqlite3
 
 # Runtime database temporary files & credential vaults
 server/data/*.tmp
