@@ -1,0 +1,448 @@
+{
+  "users": [
+    {
+      "id": "std_1",
+      "name": "Aarav Sharma",
+      "email": "aarav.sharma@campus.edu",
+      "role": "student",
+      "department": "Electrical & Computer Engineering",
+      "certifications": [
+        "ESD-101",
+        "RF-SAFETY-LVL1"
+      ],
+      "priorUsageHoursMonth": 4
+    },
+    {
+      "id": "std_2",
+      "name": "Priya Venkatesh",
+      "email": "priya.v@campus.edu",
+      "role": "student",
+      "department": "Bioengineering",
+      "certifications": [
+        "BIO-SAFETY-2",
+        "MICROSCOPY-LVL2"
+      ],
+      "priorUsageHoursMonth": 28
+    },
+    {
+      "id": "std_3",
+      "name": "Rohan Patel",
+      "email": "rohan.patel@campus.edu",
+      "role": "student",
+      "department": "Mechanical Engineering",
+      "certifications": [
+        "RAPID-PROTO-1"
+      ],
+      "priorUsageHoursMonth": 2
+    },
+    {
+      "id": "std_4",
+      "name": "Sneha Rao",
+      "email": "sneha.rao@campus.edu",
+      "role": "student",
+      "department": "Computer Science & AI",
+      "certifications": [
+        "GPU-CLUSTER-ADMIN"
+      ],
+      "priorUsageHoursMonth": 42
+    },
+    {
+      "id": "std_ineligible",
+      "name": "Karan Verma",
+      "email": "karan.verma@campus.edu",
+      "role": "student",
+      "department": "Electrical & Computer Engineering",
+      "certifications": [],
+      "priorUsageHoursMonth": 0
+    },
+    {
+      "id": "fac_1",
+      "name": "Dr. Ananya Sen",
+      "email": "ananya.sen@campus.edu",
+      "role": "faculty",
+      "department": "Electrical & Computer Engineering",
+      "certifications": [
+        "ESD-101",
+        "RF-SAFETY-LVL1",
+        "CLEANROOM-LVL1"
+      ],
+      "priorUsageHoursMonth": 0
+    },
+    {
+      "id": "fac_2",
+      "name": "Prof. Vikram Malhotra",
+      "email": "vikram.m@campus.edu",
+      "role": "faculty",
+      "department": "Bioengineering & Nanotechnology",
+      "certifications": [
+        "BIO-SAFETY-2",
+        "MICROSCOPY-LVL2",
+        "CLEANROOM-LVL1"
+      ],
+      "priorUsageHoursMonth": 0
+    },
+    {
+      "id": "admin_1",
+      "name": "Central Lab Custodian Admin",
+      "email": "labops@campus.edu",
+      "role": "admin",
+      "department": "Central Research Infrastructure",
+      "certifications": [
+        "ALL"
+      ],
+      "priorUsageHoursMonth": 0
+    }
+  ],
+  "equipment": [
+    {
+      "id": "eq_1",
+      "name": "Keysight Infiniium DSOX3014T Oscilloscope",
+      "model": "DSOX3014T",
+      "department": "Electrical & Computer Engineering",
+      "labRoom": "ECE-RF-204",
+      "custodianFacultyId": "fac_1",
+      "category": "rf_microwave",
+      "description": "1 GHz, 4 analog channels, 5 GSa/s sample rate, 1M wave/sec update rate with digital protocol decode.",
+      "specifications": {
+        "bandwidth": "1 GHz",
+        "channels": 4,
+        "samplingRate": "5 GSa/s",
+        "protocolDecode": true,
+        "maxVoltage": "300V CAT I"
+      },
+      "safetyPrerequisites": [
+        "ESD-101"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "08:00",
+        "close": "20:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "bufferTimeMinutes": 15
+    },
+    {
+      "id": "eq_2",
+      "name": "JEOL JSM-IT800 Field Emission SEM",
+      "model": "JSM-IT800",
+      "department": "Materials & Nanotechnology",
+      "labRoom": "Nano-Cleanroom-B1",
+      "custodianFacultyId": "fac_2",
+      "category": "microscopy",
+      "description": "Ultrahigh-resolution scanning electron microscope equipped with high-resolution snorkel objective lens and EDX.",
+      "specifications": {
+        "magnification": "2,000,000x",
+        "acceleratingVoltage": "0.5 to 30 kV",
+        "vacuumType": "Ultra-High",
+        "edxSpectrometer": true
+      },
+      "safetyPrerequisites": [
+        "CLEANROOM-LVL1",
+        "MICROSCOPY-LVL2"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "09:00",
+        "close": "18:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "bufferTimeMinutes": 30
+    },
+    {
+      "id": "eq_3",
+      "name": "NVIDIA DGX H100 Deep Learning Workstation",
+      "model": "DGX H100 (8x SXM5)",
+      "department": "Computer Science & AI",
+      "labRoom": "AI-HPC-402",
+      "custodianFacultyId": "fac_1",
+      "category": "compute_gpu",
+      "description": "High-throughput enterprise AI computing cluster with 8x NVIDIA H100 GPUs and 640GB aggregate high-bandwidth VRAM.",
+      "specifications": {
+        "gpuCount": 8,
+        "totalVram": "640 GB HBM3",
+        "fp8Compute": "32 PFLOPS",
+        "interconnect": "NVLink 900 GB/s"
+      },
+      "safetyPrerequisites": [
+        "GPU-CLUSTER-ADMIN"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "00:00",
+        "close": "23:59",
+        "daysOfWeek": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "bufferTimeMinutes": 0
+    },
+    {
+      "id": "eq_4",
+      "name": "Formlabs Form 4L Large SLA 3D Printer",
+      "model": "Form 4L",
+      "department": "Mechanical Engineering",
+      "labRoom": "MakerSpace-108",
+      "custodianFacultyId": "fac_1",
+      "category": "prototyping",
+      "description": "Industrial-grade stereolithography 3D printer for ultra-accurate mechanical enclosures and biocompatible parts.",
+      "specifications": {
+        "buildVolume": "353 x 196 x 350 mm",
+        "xyResolution": "46 microns",
+        "resinTanks": [
+          "Tough 2000",
+          "BioMed Amber",
+          "Elastic 50A"
+        ]
+      },
+      "safetyPrerequisites": [
+        "RAPID-PROTO-1"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "08:00",
+        "close": "22:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "bufferTimeMinutes": 20
+    },
+    {
+      "id": "eq_5",
+      "name": "Rohde & Schwarz ZNB40 Vector Network Analyzer",
+      "model": "ZNB40",
+      "department": "Electrical & Computer Engineering",
+      "labRoom": "ECE-RF-204",
+      "custodianFacultyId": "fac_1",
+      "category": "rf_microwave",
+      "description": "High-precision 4-port 100 kHz to 40 GHz vector network analyzer for high-frequency S-parameter antenna and filter characterization.",
+      "specifications": {
+        "frequencyRange": "100 kHz to 40 GHz",
+        "dynamicRange": "140 dB",
+        "ports": 4
+      },
+      "safetyPrerequisites": [
+        "ESD-101",
+        "RF-SAFETY-LVL1"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "08:00",
+        "close": "20:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "bufferTimeMinutes": 15
+    },
+    {
+      "id": "eq_6",
+      "name": "Carl Zeiss LSM 980 Confocal Laser Microscope",
+      "model": "LSM 980 with Airyscan 2",
+      "department": "Bioengineering",
+      "labRoom": "Bio-Imaging-310",
+      "custodianFacultyId": "fac_2",
+      "category": "microscopy",
+      "description": "Multiphoton confocal microscope with Airyscan 2 multiplex mode for super-resolution live cell fluorescence imaging.",
+      "specifications": {
+        "laserLines": [
+          "405nm",
+          "488nm",
+          "561nm",
+          "633nm"
+        ],
+        "magnifications": [
+          "10x",
+          "20x",
+          "40x Oil",
+          "63x Oil"
+        ],
+        "superResolution": "90 nm lateral"
+      },
+      "safetyPrerequisites": [
+        "BIO-SAFETY-2",
+        "MICROSCOPY-LVL2"
+      ],
+      "status": "operational",
+      "operatingHours": {
+        "open": "09:00",
+        "close": "19:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "bufferTimeMinutes": 30
+    },
+    {
+      "id": "eq_7",
+      "name": "Instron 5969 Universal Mechanical Tester",
+      "model": "Instron 5969",
+      "department": "Mechanical Engineering",
+      "labRoom": "Materials-Test-102",
+      "custodianFacultyId": "fac_1",
+      "category": "prototyping",
+      "description": "Dual column table-top mechanical testing system for tensile, compression, and peel testing.",
+      "specifications": {
+        "maxLoad": "50 kN",
+        "crossheadSpeed": "0.001 to 1000 mm/min"
+      },
+      "safetyPrerequisites": [
+        "MATERIALS-SAFETY-1"
+      ],
+      "status": "maintenance",
+      "operatingHours": {
+        "open": "08:00",
+        "close": "18:00",
+        "daysOfWeek": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "bufferTimeMinutes": 15
+    }
+  ],
+  "maintenanceWindows": [
+    {
+      "id": "maint_1",
+      "equipmentId": "eq_1",
+      "title": "Annual NIST Calibration & Firmware Patch",
+      "startTime": "2026-11-25T09:00:00.000Z",
+      "endTime": "2026-11-25T13:00:00.000Z",
+      "reason": "Traceable RF frequency calibration"
+    },
+    {
+      "id": "maint_2",
+      "equipmentId": "eq_2",
+      "title": "Vacuum Ion Pump Service",
+      "startTime": "2026-11-26T14:00:00.000Z",
+      "endTime": "2026-11-26T18:00:00.000Z",
+      "reason": "Routine ultra-high vacuum regeneration"
+    },
+    {
+      "id": "maint_3",
+      "equipmentId": "eq_7",
+      "title": "Load Cell Recalibration",
+      "startTime": "2026-11-23T00:00:00.000Z",
+      "endTime": "2026-11-30T23:59:59.000Z",
+      "reason": "Decommissioned for 50kN sensor replacement"
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj_1",
+      "title": "Wide-Bandgap GaN Power Inverter for Formula Student EV",
+      "studentId": "std_1",
+      "department": "Electrical & Computer Engineering",
+      "supervisorFacultyId": "fac_1",
+      "category": "undergrad_capstone",
+      "abstract": "Characterization of high-speed switching transients and ringing phenomena in 650V Gallium Nitride half-bridge modules switching at 500 kHz. Requires 1 GHz real-time bandwidth and high voltage differential probe characterization.",
+      "deliverableDeadline": "2026-11-27T17:00:00.000Z",
+      "extractedSpecs": {
+        "requiredCapabilities": [
+          "High Bandwidth Oscilloscope",
+          "Multi-channel",
+          "Fast Transient Capture"
+        ],
+        "minBandwidth": "500 MHz",
+        "recommendedEquipmentIds": [
+          "eq_1"
+        ]
+      }
+    },
+    {
+      "id": "proj_2",
+      "title": "Microfluidic Immuno-Capture for Early Circulating Tumor Cell Isolation",
+      "studentId": "std_2",
+      "department": "Bioengineering",
+      "supervisorFacultyId": "fac_2",
+      "category": "masters_thesis",
+      "abstract": "Microfluidic device fabrication using biocompatible resin and subsequent morphological validation via confocal fluorescence imaging to observe fluorescent antibody binding on micro-channel posts.",
+      "deliverableDeadline": "2026-12-08T17:00:00.000Z",
+      "extractedSpecs": {
+        "requiredCapabilities": [
+          "Confocal Laser Scanning",
+          "Fluorescence Imaging",
+          "Precision SLA 3D Printing"
+        ],
+        "recommendedEquipmentIds": [
+          "eq_6",
+          "eq_4"
+        ]
+      }
+    },
+    {
+      "id": "proj_3",
+      "title": "Generative Diffusion Model for 3D Protein Backbone Folding",
+      "studentId": "std_4",
+      "department": "Computer Science & AI",
+      "supervisorFacultyId": "fac_1",
+      "category": "phd_thesis",
+      "abstract": "Training invariant SE(3) diffusion models on full-length AlphaFold structures with billions of parameters. Requires large VRAM cluster and multi-GPU tensor parallelism.",
+      "deliverableDeadline": "2026-11-26T12:00:00.000Z",
+      "extractedSpecs": {
+        "requiredCapabilities": [
+          "Multi-GPU Node",
+          "High VRAM",
+          "FP8 Tensor Acceleration"
+        ],
+        "recommendedEquipmentIds": [
+          "eq_3"
+        ]
+      }
+    }
+  ],
+  "bookings": [
+    {
+      "id": "book_existing_1",
+      "projectId": "proj_1",
+      "studentId": "std_1",
+      "equipmentId": "eq_1",
+      "requestedStartTime": "2026-11-24T10:00:00.000Z",
+      "requestedEndTime": "2026-11-24T12:00:00.000Z",
+      "purposeSummary": "Gate drive ringing characterization",
+      "status": "confirmed",
+      "facultyEndorsement": {
+        "facultyId": "fac_1",
+        "endorsedAt": "2026-11-23T08:00:00.000Z",
+        "isApproved": true,
+        "note": "Approved for senior capstone lab testing."
+      },
+      "createdAt": "2026-11-23T07:00:00.000Z"
+    }
+  ]
+}

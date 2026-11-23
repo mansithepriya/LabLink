@@ -1,0 +1,21 @@
+{
+  "name": "lablink",
+  "version": "1.0.0",
+  "description": "LabLink — The Intelligent Laboratory Resource Network with FAIRALLOC",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "npm run build --prefix client",
+    "test": "npm test --prefix server",
+    "dev": "node server/server.js"
+  },
+  "keywords": [
+    "lablink",
+    "fairalloc",
+    "laboratory-sharing",
+    "resource-allocation",
+    "cloud-run"
+  ],
+  "author": "LabLink Engineering",
+  "license": "MIT"
+}
