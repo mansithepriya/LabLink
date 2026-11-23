@@ -2,8 +2,10 @@
 
 > **A GenAI-Powered Campus Research & Laboratory Resource Allocation Platform with FAIRALLOC™**
 
-[![Tests](https://img.shields.io/badge/tests-44%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen.svg)]()
 [![Gemini](https://img.shields.io/badge/Gemini%20API-%40google%2Fgenai-blue.svg)]()
+[![OAuth 2.0](https://img.shields.io/badge/Google%20Calendar-OAuth%202.0%20Sync-green.svg)]()
+[![Encryption](https://img.shields.io/badge/Token%20Security-AES--256--GCM-red.svg)]()
 [![Timezone](https://img.shields.io/badge/Timezone-Asia%2FKolkata-teal.svg)]()
 [![Container](https://img.shields.io/badge/Container-Cloud%20Run%20Ready-blueviolet.svg)]()
 
@@ -44,12 +46,12 @@ LabLink is a campus research laboratory resource ecosystem designed to maximize 
                         ┌───────────────────────┴───────────────────────┐
                         ▼                                               ▼
 ┌──────────────────────────────────────────────┐ ┌──────────────────────────────────────────┐
-│ 3. LABLINK IoT INTELLIGENCE                  │ │ 4. LABLINK CALENDAR CONNECT              │
-│    • Hardware Telemetry Simulation           │ │    • Instant Google Calendar Integration │
-│    • Monitored nodes: CS, ECE, Mech, Robo    │ │    • RFC 5545 Compliant .ics Export      │
-│    • Real-time temp, watts, utilization      │ │    • Strict Asia/Kolkata Timezone        │
-│    • Rule-based threshold alerts (overheat)  │ │    • Status Gating: Only approved/       │
-│    • Emergency maintenance booking lockout   │ │      confirmed bookings can export       │
+│ 3. LABLINK IoT INTELLIGENCE                  │ │ 4. REAL GOOGLE CALENDAR SYNC (OAUTH 2.0) │
+│    • Hardware Telemetry Simulation           │ │    • Official googleapis OAuth2 client   │
+│    • Monitored nodes: CS, ECE, Mech, Robo    │ │    • AES-256-GCM authenticated token vault│
+│    • Real-time temp, watts, utilization      │ │    • Zero plaintext tokens on disk/memory│
+│    • Rule-based threshold alerts (overheat)  │ │    • Bidirectional push/incremental sync │
+│    • Emergency maintenance booking lockout   │ │    • External tamper & conflict detection│
 └──────────────────────────────────────────────┘ └──────────────────────────────────────────┘
 ```
 
@@ -77,10 +79,15 @@ LabLink is a campus research laboratory resource ecosystem designed to maximize 
 - Rule-based threshold alerts (e.g. Oscilloscope thermal warning > 65°C).
 - Bidirectional maintenance integration: placing a machine under maintenance locks out new bookings and flags existing reservations.
 
-### 4. LABLINK Calendar Connect
-- One-click "Add to Google Calendar" with pre-filled laboratory, equipment, and reference details.
-- Downloadable standard `.ics` calendar events with CRLF line endings, special character escaping, and `Asia/Kolkata` timezone.
-- State-gated: only confirmed reservations can export calendar events.
+### 4. LABLINK Calendar Connect & Real Google Calendar Sync
+- **Official Google OAuth 2.0:** Built with the official `googleapis` Node.js client (`google.auth.OAuth2`).
+- **AES-256-GCM Encrypted Token Vault:** Tokens are encrypted with authenticated AES-256-GCM (`iv:tag:cipher`) before persisting to disk. Plaintext credentials never exist in storage, logs, or frontend code.
+- **Strict User Isolation:** OAuth credentials, sync tokens, and event mappings are strictly keyed by internal LabLink `userId`. Student A can never access or sync Student B's calendar.
+- **Deterministic Sync Authority:** LabLink and FAIRALLOC remain the sole authority over reservations. If an external user moves or alters an event on Google Calendar, LabLink detects the tamper, logs an actionable discrepancy, and leaves the official reservation untouched.
+- **Bidirectional Lifecycle Sync:** Approved bookings are automatically inserted into Google Calendar; cancelled bookings are automatically removed.
+- **Incremental Sync with Auto-Recovery:** Uses Google Calendar `syncToken` pagination. Handles HTTP 410 (Gone / Expired Sync Token) by automatically purging stale tokens and resynchronizing cleanly.
+- **Push Notifications & Polling:** Supports Google Calendar `events.watch` webhooks with HMAC verification and a graceful manual/polling fallback.
+- **Standard Exports:** Downloadable standard `.ics` calendar events and Google Calendar quick-add URLs with `Asia/Kolkata` timezone.
 
 ---
 
@@ -102,18 +109,28 @@ npm install
 ```
 
 ### 2. Environment Configuration
-Create `.env` in the root or server directory:
+Create `.env` in the root or server directory (see `.env.example` for full reference):
 ```env
 PORT=8080
 NODE_ENV=production
 
-# Optional Gemini API Key
+# Gemini AI Integration
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+
+# Google Calendar OAuth 2.0 Integration
+GOOGLE_CLIENT_ID=your_oauth_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_oauth_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:8080/api/calendar/oauth/callback
+
+# Token Vault & Security
+CALENDAR_ENCRYPTION_KEY=64_character_hex_or_passphrase_for_aes_256_gcm
+OAUTH_STATE_SECRET=random_secret_for_csrf_state_signing
+STORAGE_BACKEND=vault
 ```
 
 ### 3. Run Tests
-The comprehensive pre-deployment test suite runs 44 automated tests in under 1 second:
+The comprehensive pre-deployment test suite runs 57 automated tests across 15 suites in under 1 second:
 ```bash
 cd server
 npm test
@@ -162,9 +179,11 @@ gcloud run deploy lablink \
 
 | Category | Status | Details |
 | :--- | :---: | :--- |
-| **All 44 Tests** | ✅ PASSED | 35 Core/IoT/Calendar tests + 9 Gemini resilience tests |
+| **All 57 Tests** | ✅ PASSED | 35 Core/IoT/Calendar tests + 9 Gemini tests + 13 OAuth & Bidirectional Sync tests |
 | **Production Build** | ✅ PASSED | Vite client build in 762ms |
 | **Gemini Integration** | ✅ PASSED | Official `@google/genai`, strict grounding, 10s timeout, PII redaction |
+| **OAuth 2.0 & Token Vault** | ✅ PASSED | AES-256-GCM encrypted vault, CSRF signed state, user isolation |
+| **Bidirectional Sync** | ✅ PASSED | Lifecycle sync, syncToken incremental updates, 410 auto-recovery, tamper detection |
 | **Zero Hallucination** | ✅ PASSED | Real catalogue validation; rogue IDs filtered |
 | **Deterministic Fallback** | ✅ PASSED | Seamless transition when offline or unconfigured |
 | **Cloud Run Readiness** | ✅ PASSED | Dynamic `$PORT`, `/health` endpoint, Docker multi-stage |

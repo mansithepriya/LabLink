@@ -68,6 +68,13 @@ export default function App() {
   const [aiResults, setAiResults] = useState(null);
   const [aiEngineStatus, setAiEngineStatus] = useState(null);
 
+  // Calendar Connect & OAuth Sync State
+  const [calendarStatus, setCalendarStatus] = useState(null);
+  const [calendarConflicts, setCalendarConflicts] = useState([]);
+  const [syncedEventsList, setSyncedEventsList] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [syncingCalendar, setSyncingCalendar] = useState(false);
+
   // Booking Modal State
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
@@ -157,12 +164,56 @@ export default function App() {
     }
   };
 
+  // Fetch Google Calendar Sync & Connection Data
+  const fetchCalendarData = async (studentId = currentStudentId) => {
+    try {
+      setCalendarLoading(true);
+      const headers = { 'x-student-id': studentId };
+      const [statusRes, conflictsRes, eventsRes] = await Promise.all([
+        fetch(`/api/calendar/status?studentId=${studentId}`, { headers }),
+        fetch(`/api/calendar/conflicts?studentId=${studentId}`, { headers }),
+        fetch(`/api/calendar/synced-events?studentId=${studentId}`, { headers })
+      ]);
+
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        setCalendarStatus(statusData.data);
+      }
+      if (conflictsRes.ok) {
+        const confData = await conflictsRes.json();
+        setCalendarConflicts(confData.data || []);
+      }
+      if (eventsRes.ok) {
+        const evData = await eventsRes.json();
+        setSyncedEventsList(evData.data || []);
+      }
+    } catch (e) {
+      console.warn('Calendar sync data fetch error:', e.message);
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     fetchData();
     fetchIotData();
     fetchAiStatus();
+    fetchCalendarData(currentStudentId);
+
+    // Check if returning from Google OAuth redirect
+    if (window.location.search.includes('calendar_connected=success')) {
+      setSuccessMsg('Google Calendar successfully connected! Two-way reservation synchronization is active.');
+      // Clean up URL without reload
+      window.history.replaceState({}, document.title, window.location.pathname + '#calendar');
+      setActiveTab('calendar');
+    }
   }, []);
+
+  // Refetch student calendar data when active student persona changes
+  useEffect(() => {
+    fetchCalendarData(currentStudentId);
+  }, [currentStudentId]);
 
   // Periodic Telemetry Simulation Polling (every 4 seconds when active)
   useEffect(() => {
@@ -182,6 +233,79 @@ export default function App() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [activeTab, simulationPaused]);
+
+  // Calendar Connect & Synchronization Handlers
+  const handleConnectCalendar = async () => {
+    try {
+      setCalendarLoading(true);
+      const res = await fetch(`/api/calendar/connect?studentId=${currentStudentId}`, {
+        headers: { Accept: 'application/json', 'x-student-id': currentStudentId }
+      });
+      const data = await res.json();
+      if (res.ok && data.data?.authUrl) {
+        window.location.href = data.data.authUrl;
+      } else {
+        setErrorMsg('Failed to initiate Google Calendar connection.');
+      }
+    } catch (err) {
+      setErrorMsg('Network error connecting to Google Calendar OAuth.');
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleDisconnectCalendar = async () => {
+    try {
+      setCalendarLoading(true);
+      const res = await fetch('/api/calendar/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-student-id': currentStudentId }
+      });
+      if (res.ok) {
+        setSuccessMsg('Google Calendar disconnected.');
+        await fetchCalendarData(currentStudentId);
+      }
+    } catch (err) {
+      setErrorMsg('Failed to disconnect Google Calendar.');
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleTriggerCalendarSync = async () => {
+    try {
+      setSyncingCalendar(true);
+      const res = await fetch('/api/calendar/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-student-id': currentStudentId }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMsg(data.message || 'Incremental calendar synchronization completed.');
+        await fetchCalendarData(currentStudentId);
+      } else {
+        setErrorMsg(data.error || 'Calendar synchronization failed.');
+      }
+    } catch (err) {
+      setErrorMsg('Network error during calendar synchronization.');
+    } finally {
+      setSyncingCalendar(false);
+    }
+  };
+
+  const handleResolveCalendarConflict = async (conflictId) => {
+    try {
+      const res = await fetch(`/api/calendar/conflicts/${conflictId}/resolve`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        setSuccessMsg('Calendar conflict notification acknowledged.');
+        await fetchCalendarData(currentStudentId);
+      }
+    } catch (err) {
+      setErrorMsg('Failed to acknowledge conflict.');
+    }
+  };
 
   // IoT Simulation Controls
   const handleTickManual = async () => {
@@ -522,6 +646,21 @@ export default function App() {
               aria-current={activeTab === 'iot' ? 'page' : undefined}
             >
               <Activity size={16} /> IoT Intelligence
+            </button>
+            <button
+              onClick={() => setActiveTab('calendar')}
+              className={`nav-btn ${activeTab === 'calendar' ? 'active' : ''}`}
+              aria-current={activeTab === 'calendar' ? 'page' : undefined}
+            >
+              <Calendar size={16} /> Calendar Sync
+              {calendarStatus?.connected && (
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--lime-500)', display: 'inline-block' }} />
+              )}
+              {calendarConflicts.length > 0 && (
+                <span className="badge badge-warning" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
+                  {calendarConflicts.length}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setActiveTab('faculty')}
@@ -1564,6 +1703,228 @@ export default function App() {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: GOOGLE CALENDAR SYNC & OAUTH CONNECTIONS */}
+        {activeTab === 'calendar' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--forest-800)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Calendar size={24} style={{ color: 'var(--teal-600)' }} /> Google Calendar Live Synchronization
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  Secure bidirectional OAuth 2.0 integration with automatic event synchronization, incremental updates, and schedule conflict defense.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                {calendarStatus?.connected && (
+                  <button
+                    onClick={handleTriggerCalendarSync}
+                    disabled={syncingCalendar}
+                    className="btn btn-outline"
+                    style={{ fontSize: '0.85rem' }}
+                  >
+                    <RefreshCw size={14} className={syncingCalendar ? 'spin' : ''} />
+                    {syncingCalendar ? 'Syncing...' : 'Sync Now'}
+                  </button>
+                )}
+                {calendarStatus?.connected ? (
+                  <button
+                    onClick={handleDisconnectCalendar}
+                    disabled={calendarLoading}
+                    className="btn btn-outline"
+                    style={{ color: '#DC2626', borderColor: '#FECACA', fontSize: '0.85rem' }}
+                  >
+                    Disconnect Calendar
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleConnectGoogleCalendar}
+                    disabled={calendarLoading}
+                    className="btn btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
+                  >
+                    <Calendar size={16} /> Connect Google Calendar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Connection Status Overview Banner */}
+            <div className="card" style={{ marginBottom: '1.5rem', borderLeft: calendarStatus?.connected ? '4px solid var(--lime-500)' : '4px solid #F59E0B' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '50%',
+                    background: calendarStatus?.connected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: calendarStatus?.connected ? 'var(--forest-800)' : '#B45309'
+                  }}>
+                    {calendarStatus?.connected ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--forest-900)', marginBottom: '0.2rem' }}>
+                      {calendarStatus?.connected
+                        ? `Connected to Google Calendar (${calendarStatus.googleEmail})`
+                        : 'Google Calendar Not Connected'}
+                    </h3>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                      {calendarStatus?.connected
+                        ? `Two-way incremental synchronization is active. Last synced: ${calendarStatus.lastSyncedAt ? new Date(calendarStatus.lastSyncedAt).toLocaleString() : 'Never'}`
+                        : 'Connect your institutional or personal Google Calendar to automatically receive approved laboratory bookings and detect conflicting personal commitments.'}
+                    </p>
+                  </div>
+                </div>
+
+                <span className={`badge ${calendarStatus?.connected ? 'badge-confirmed' : 'badge-warning'}`} style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}>
+                  {calendarStatus?.connected ? 'OAUTH ACTIVE' : 'UNCONNECTED'}
+                </span>
+              </div>
+
+              {!calendarStatus?.isConfigured && !calendarStatus?.connected && (
+                <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#FFFBEB', borderRadius: 'var(--radius-sm)', border: '1px solid #FDE68A', fontSize: '0.8rem', color: '#92400E' }}>
+                  <strong>Setup Notice:</strong> <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> are not configured in the active environment.
+                  Set your OAuth credentials in <code>.env</code> or Google Cloud Run Secrets to complete live OAuth consent.
+                </div>
+              )}
+            </div>
+
+            {/* Grid: External Calendar Conflicts & Synced Reservations */}
+            <div className="grid-2" style={{ alignItems: 'start' }}>
+              {/* Left Column: Conflicts & Discrepancies */}
+              <div>
+                <div className="card" style={{ marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--forest-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <AlertTriangle size={18} style={{ color: calendarConflicts.length > 0 ? '#DC2626' : 'var(--text-muted)' }} />
+                      External Scheduling Conflicts ({calendarConflicts.length})
+                    </h3>
+                    {calendarConflicts.length > 0 && (
+                      <span className="badge badge-warning">{calendarConflicts.length} Action Needed</span>
+                    )}
+                  </div>
+
+                  {calendarConflicts.length === 0 ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', background: '#F8FAFC', borderRadius: 'var(--radius-sm)' }}>
+                      <CheckCircle2 size={32} style={{ color: 'var(--teal-600)', margin: '0 auto 0.75rem' }} />
+                      <p style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--forest-900)' }}>Zero Calendar Conflicts</p>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        All confirmed laboratory slots are completely conflict-free. No external overlapping meetings detected.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {calendarConflicts.map((conf) => (
+                        <div key={conf.id} style={{
+                          padding: '0.85rem',
+                          borderRadius: 'var(--radius-sm)',
+                          background: conf.type === 'schedule_overlap' ? '#FEF2F2' : '#FFFBEB',
+                          border: `1px solid ${conf.type === 'schedule_overlap' ? '#FCA5A5' : '#FDE68A'}`
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
+                            <span style={{
+                              fontWeight: 700,
+                              fontSize: '0.8rem',
+                              color: conf.type === 'schedule_overlap' ? '#991B1B' : '#92400E',
+                              textTransform: 'uppercase'
+                            }}>
+                              {conf.type === 'schedule_overlap' ? 'Personal Event Overlap' : 'External Calendar Alteration'}
+                            </span>
+                            <button
+                              onClick={() => handleResolveCalendarConflict(conf.id)}
+                              className="btn btn-outline"
+                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                            >
+                              Acknowledge
+                            </button>
+                          </div>
+                          <p style={{ fontSize: '0.82rem', color: '#1F2937', marginBottom: '0.4rem', lineHeight: 1.4 }}>
+                            {conf.message}
+                          </p>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Detected at: {new Date(conf.detectedAt).toLocaleTimeString()}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Conflict Defense Explainer Card */}
+                <div className="card" style={{ background: '#F1F7F4', border: '1px solid var(--teal-200)' }}>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--forest-900)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Shield size={16} /> FAIRALLOC Authority & Calendar Policy
+                  </h4>
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--forest-800)', lineHeight: 1.5 }}>
+                    <li><strong>Authoritative Booking Engine:</strong> External edits to Google Calendar events never silently alter university equipment allocations.</li>
+                    <li><strong>Two-Way Synchronization:</strong> Approved reservations automatically flow to Google Calendar; modifications or cancellations are synchronized in real-time.</li>
+                    <li><strong>Conflict Shield:</strong> LabLink queries your personal calendar to proactively warn you of personal appointments overlapping with lab sessions.</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Right Column: Synced Reservations List */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--forest-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <CheckCircle2 size={18} style={{ color: 'var(--teal-600)' }} />
+                    Synchronized Google Calendar Events ({syncedEventsList.length})
+                  </h3>
+                </div>
+
+                {syncedEventsList.length === 0 ? (
+                  <div style={{ padding: '2.5rem', textAlign: 'center', background: '#F8FAFC', borderRadius: 'var(--radius-sm)' }}>
+                    <Calendar size={36} style={{ color: 'var(--text-muted)', margin: '0 auto 0.75rem' }} />
+                    <p style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--forest-900)' }}>No Active Synced Reservations</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      When your laboratory requests are approved by faculty supervisors, they will appear here and sync directly into your Google Calendar.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {syncedEventsList.map((item) => (
+                      <div key={item.bookingId} style={{
+                        padding: '0.85rem',
+                        borderRadius: 'var(--radius-sm)',
+                        background: '#FFFFFF',
+                        border: '1px solid var(--border-light)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--forest-900)', marginBottom: '0.2rem' }}>
+                            {item.equipmentName}
+                          </h4>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                            Room: {item.labRoom} • Booking ID: {item.bookingId}
+                          </p>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--teal-700)', fontWeight: 600 }}>
+                            {new Date(item.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                          </p>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <span className={`badge badge-${item.status === 'synced' ? 'confirmed' : 'warning'}`} style={{ fontSize: '0.75rem', marginBottom: '0.4rem' }}>
+                            {item.status.toUpperCase()}
+                          </span>
+                          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            Synced: {new Date(item.syncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

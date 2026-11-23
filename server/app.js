@@ -1,12 +1,14 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import cookieParser from 'cookie-parser';
 import healthRouter from './routes/health.js';
 import equipmentRouter from './routes/equipment.js';
 import bookingsRouter from './routes/bookings.js';
 import aiRouter from './routes/ai.js';
 import analyticsRouter from './routes/analytics.js';
 import iotRouter from './routes/iot.js';
+import calendarRouter from './routes/calendar.js';
 import { store } from './services/store.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,11 +19,12 @@ const app = express();
 // Security & Body Parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Basic CORS headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-student-id, x-user-id');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -37,6 +40,7 @@ app.use('/api/bookings', bookingsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/iot', iotRouter);
+app.use('/api/calendar', calendarRouter);
 
 // Auxiliary Endpoints for Role Simulator
 app.get('/api/users', (req, res) => {

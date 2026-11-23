@@ -482,11 +482,23 @@
       "status": "confirmed",
       "facultyEndorsement": {
         "facultyId": "fac_1",
-        "endorsedAt": "2026-11-23T08:00:00.000Z",
+        "endorsedAt": "2026-11-23T11:06:45.719Z",
         "isApproved": true,
-        "note": "Approved for senior capstone lab testing."
+        "note": "Approved by faculty supervisor."
       },
-      "createdAt": "2026-11-23T07:00:00.000Z"
+      "createdAt": "2026-11-23T07:00:00.000Z",
+      "allocationMetadata": {
+        "fairAllocScore": 84.8,
+        "scoreBreakdown": {
+          "urgencyScore": 78,
+          "academicTierScore": 75,
+          "fairnessScore": 95,
+          "endorsementScore": 100,
+          "daysUntilDeadline": 4.2,
+          "priorUsageHours": 4
+        },
+        "explanation": "FAIRALLOC Score: 84.8/100. [Urgency: 78/100] Deliverable due in 4.2 days (2026-11-27). [Academic Tier: 75/100] Program track: UNDERGRAD CAPSTONE. [Fairness Index: 95/100] Prior 30-day usage: 4 hrs (Fair benchmark: 20 hrs). [Faculty Status: 100/100] Endorsed by faculty supervisor."
+      }
     }
   ]
 }

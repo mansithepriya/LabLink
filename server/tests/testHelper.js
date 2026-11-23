@@ -55,6 +55,7 @@ class TestRequest {
         resResolve({
           status: res.statusCode,
           body: parsedBody,
+          text: typeof parsedBody === 'string' ? parsedBody : rawOutput,
           headers: res.getHeaders()
         });
       };

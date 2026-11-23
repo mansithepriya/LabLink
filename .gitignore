@@ -20,8 +20,10 @@ build/
 *.key
 *.pem
 
-# Runtime database temporary files
+# Runtime database temporary files & credential vaults
 server/data/*.tmp
+server/data/*_vault.json
+server/data/lablink_tokens_vault.json
 
 # OS and IDE files
 .DS_Store

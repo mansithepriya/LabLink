@@ -2,6 +2,7 @@ import express from 'express';
 import { store } from '../services/store.js';
 import { FairAllocEngine } from '../services/fairalloc.js';
 import { CalendarConnectService } from '../services/calendarConnect.js';
+import { GoogleCalendarSyncService } from '../services/googleCalendarSync.js';
 
 const router = express.Router();
 
@@ -210,7 +211,7 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/bookings/:id/endorse - Faculty supervisor approves or rejects request
-router.post('/:id/endorse', (req, res) => {
+router.post('/:id/endorse', async (req, res) => {
   try {
     const { facultyId, isApproved, note } = req.body;
     const booking = store.getBookingById(req.params.id);
@@ -251,6 +252,15 @@ router.post('/:id/endorse', (req, res) => {
       }
     });
 
+    // Auto-sync approved reservation to student's Google Calendar if connected
+    if (isApproved) {
+      try {
+        await GoogleCalendarSyncService.syncBookingToGoogle(booking.id);
+      } catch (syncErr) {
+        console.warn(`[Auto-Sync] Notice on approval for ${booking.id}:`, syncErr.message);
+      }
+    }
+
     res.json({
       success: true,
       message: `Booking request successfully ${isApproved ? 'approved and confirmed' : 'rejected'}.`,
@@ -262,7 +272,7 @@ router.post('/:id/endorse', (req, res) => {
 });
 
 // POST /api/bookings/:id/cancel - Student or admin cancels a booking
-router.post('/:id/cancel', (req, res) => {
+router.post('/:id/cancel', async (req, res) => {
   try {
     const booking = store.getBookingById(req.params.id);
     if (!booking) {
@@ -274,6 +284,13 @@ router.post('/:id/cancel', (req, res) => {
       cancelledAt: new Date().toISOString(),
       cancellationReason: req.body.reason || 'Cancelled by requester'
     });
+
+    // Remove or cancel mapped Google Calendar event if synced
+    try {
+      await GoogleCalendarSyncService.deleteGoogleEvent(booking.id);
+    } catch (syncErr) {
+      console.warn(`[Auto-Sync] Notice on cancellation for ${booking.id}:`, syncErr.message);
+    }
 
     res.json({
       success: true,

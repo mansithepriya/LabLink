@@ -5,13 +5,18 @@ import { store } from '../services/store.js';
 import { FairAllocEngine } from '../services/fairalloc.js';
 import { CalendarConnectService } from '../services/calendarConnect.js';
 import { AiMatcherService, sanitizeInput, safeParseJson } from '../services/aiMatcher.js';
+import { GoogleOAuthService } from '../services/googleOAuth.js';
+import { GoogleCalendarSyncService } from '../services/googleCalendarSync.js';
+import { tokenStore } from '../services/tokenStore.js';
+import { cryptoService } from '../services/cryptoService.js';
 
 const request = testClient;
 
 describe('LABLINK Pre-Deployment Engineering Audit Test Suite', () => {
   beforeEach(() => {
-    // Reset store to known baseline before each test
+    // Reset store and token vault to known baseline before each test
     store.reset();
+    tokenStore.reset();
   });
 
   describe('1. Health Endpoint and Server Startup', () => {
@@ -837,6 +842,374 @@ describe('LABLINK Pre-Deployment Engineering Audit Test Suite', () => {
       } finally {
         AiMatcherService.clearMockClient();
       }
+    });
+  });
+
+  describe('15. Real Google Calendar OAuth 2.0 & Bidirectional Synchronization', () => {
+    beforeEach(() => {
+      tokenStore.reset();
+      GoogleOAuthService.clearMockClient();
+      GoogleCalendarSyncService.clearMockCalendar();
+    });
+
+    it('OAuth state generation: generates cryptographically secure HMAC-signed state with userId', () => {
+      const { authUrl, state } = GoogleOAuthService.generateConnectUrl('std_1', '/#calendar');
+      expect(authUrl).toContain('https://accounts.google.com/o/oauth2/v2/auth');
+      expect(authUrl).toContain('access_type=offline');
+      expect(authUrl).toContain('prompt=consent');
+      expect(authUrl).toContain('state=');
+      
+      const verification = cryptoService.verifyOAuthState(state);
+      expect(verification.valid).toBe(true);
+      expect(verification.payload.userId).toBe('std_1');
+      expect(verification.payload.returnUrl).toBe('/#calendar');
+    });
+
+    it('OAuth state security: rejects tampered state and expired state', () => {
+      const { state } = GoogleOAuthService.generateConnectUrl('std_1');
+      const tampered = state.slice(0, -4) + 'abcd';
+      const verifyTampered = cryptoService.verifyOAuthState(tampered);
+      expect(verifyTampered.valid).toBe(false);
+      expect(verifyTampered.error).toContain('CSRF');
+
+      const expiredPayload = { userId: 'std_1', timestamp: Date.now() - 15 * 60 * 1000 };
+      const expiredState = cryptoService.signOAuthState(expiredPayload);
+      const verifyExpired = cryptoService.verifyOAuthState(expiredState, 10 * 60 * 1000);
+      expect(verifyExpired.valid).toBe(false);
+      expect(verifyExpired.error).toContain('expired');
+    });
+
+    it('Callback with invalid state rejects with 400 Bad Request', async () => {
+      const res = await request(app).get('/api/calendar/oauth/callback?code=fake_code&state=invalid.state');
+      expect(res.status).toBe(400);
+      expect(res.text).toContain('OAuth state validation failed');
+    });
+
+    it('Successful token exchange: encrypts tokens at rest and binds to authenticated user', async () => {
+      const mockOAuthClient = {
+        getToken: async () => ({
+          tokens: {
+            access_token: 'mock_access_token_123',
+            refresh_token: 'mock_refresh_token_456',
+            expiry_date: Date.now() + 3600000,
+            scope: 'https://www.googleapis.com/auth/calendar.events'
+          }
+        }),
+        getTokenInfo: async () => ({
+          email: 'aarav.sharma@campus.edu',
+          sub: 'google_user_789'
+        })
+      };
+      GoogleOAuthService.setMockClient(mockOAuthClient);
+
+      const state = cryptoService.signOAuthState({ userId: 'std_1', returnUrl: '/#calendar' });
+      const res = await request(app).get(`/api/calendar/oauth/callback?code=mock_code&state=${state}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('calendar_connected=success');
+
+      // Verify tokens are stored encrypted at rest
+      const status = tokenStore.getConnectionStatus('std_1');
+      expect(status.connected).toBe(true);
+      expect(status.googleEmail).toBe('aarav.sharma@campus.edu');
+
+      // Verify decrypted retrieval
+      const tokens = tokenStore.getUserTokens('std_1');
+      expect(tokens.refreshToken).toBe('mock_refresh_token_456');
+      expect(tokens.accessToken).toBe('mock_access_token_123');
+
+      // Ensure raw tokens never leak into public status endpoint
+      const statusRes = await request(app).get('/api/calendar/status?studentId=std_1');
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.data.connected).toBe(true);
+      expect(JSON.stringify(statusRes.body)).not.toContain('mock_refresh_token_456');
+      expect(JSON.stringify(statusRes.body)).not.toContain('mock_access_token_123');
+    });
+
+    it('Missing refresh token handling on repeat consent preserves existing refresh token', async () => {
+      // Seed existing valid tokens
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'original_durable_refresh_token',
+        accessToken: 'old_access'
+      });
+
+      // Google returns only a new access token without refresh_token
+      const mockRepeatConsentClient = {
+        getToken: async () => ({
+          tokens: {
+            access_token: 'new_access_token_789',
+            refresh_token: undefined,
+            expiry_date: Date.now() + 3600000
+          }
+        }),
+        getTokenInfo: async () => ({ email: 'aarav@campus.edu' })
+      };
+      GoogleOAuthService.setMockClient(mockRepeatConsentClient);
+
+      const state = cryptoService.signOAuthState({ userId: 'std_1' });
+      await GoogleOAuthService.handleOAuthCallback('repeat_code', state);
+
+      // Verify original refresh token was retained
+      const updatedTokens = tokenStore.getUserTokens('std_1');
+      expect(updatedTokens.refreshToken).toBe('original_durable_refresh_token');
+      expect(updatedTokens.accessToken).toBe('new_access_token_789');
+    });
+
+    it('User isolation: guarantees complete separation between student accounts', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'std1_secret_token'
+      });
+
+      const std1Status = tokenStore.getConnectionStatus('std_1');
+      const std2Status = tokenStore.getConnectionStatus('std_2');
+
+      expect(std1Status.connected).toBe(true);
+      expect(std2Status.connected).toBe(false);
+      expect(tokenStore.getUserTokens('std_2')).toBeNull();
+    });
+
+    it('Booking approval creates exactly one Google Calendar event idempotently', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+
+      let insertCount = 0;
+      let patchCount = 0;
+      let insertedPayload = null;
+
+      const mockCalendar = {
+        events: {
+          insert: async ({ requestBody }) => {
+            insertCount++;
+            insertedPayload = requestBody;
+            return { data: { id: 'gcal_event_001', htmlLink: 'https://calendar.google.com/event?eid=001' } };
+          },
+          patch: async () => {
+            patchCount++;
+            return { data: { id: 'gcal_event_001' } };
+          }
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(mockCalendar);
+
+      // Approve booking
+      const res = await request(app).post('/api/bookings/book_existing_1/endorse').send({
+        isApproved: true,
+        facultyId: 'fac_1',
+        note: 'Approved for senior thesis.'
+      });
+      expect(res.status).toBe(200);
+
+      expect(insertCount).toBe(1);
+      expect(insertedPayload.summary).toContain('[LabLink]');
+      expect(insertedPayload.start.timeZone).toBe('Asia/Kolkata');
+      expect(insertedPayload.extendedProperties.private.lablinkBookingId).toBe('book_existing_1');
+
+      // Verify mapping in store
+      const mapping = tokenStore.getEventMapping('book_existing_1');
+      expect(mapping.googleEventId).toBe('gcal_event_001');
+
+      // Idempotency: re-syncing must update via patch, NOT create a duplicate event
+      await GoogleCalendarSyncService.syncBookingToGoogle('book_existing_1');
+      expect(insertCount).toBe(1);
+      expect(patchCount).toBe(1);
+    });
+
+    it('Booking cancellation removes or cancels mapped event on Google Calendar', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+      tokenStore.saveEventMapping('book_existing_1', {
+        userId: 'std_1',
+        googleEventId: 'gcal_event_to_delete',
+        status: 'synced'
+      });
+
+      let deleteCalledWithId = null;
+      const mockCalendar = {
+        events: {
+          delete: async ({ eventId }) => {
+            deleteCalledWithId = eventId;
+            return { data: {} };
+          }
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(mockCalendar);
+
+      const cancelRes = await request(app).post('/api/bookings/book_existing_1/cancel').send({
+        reason: 'Student rescheduled testing'
+      });
+      expect(cancelRes.status).toBe(200);
+      expect(deleteCalledWithId).toBe('gcal_event_to_delete');
+
+      const mapping = tokenStore.getEventMapping('book_existing_1');
+      expect(mapping.status).toBe('cancelled');
+    });
+
+    it('Inbound sync: detects external Google Calendar edits without altering LabLink reservation', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+
+      // book_existing_1 is at 2026-11-24T10:00:00.000Z
+      tokenStore.saveEventMapping('book_existing_1', {
+        userId: 'std_1',
+        googleEventId: 'gcal_event_tampered',
+        lastKnownStartTime: '2026-11-24T10:00:00.000Z',
+        lastKnownEndTime: '2026-11-24T12:00:00.000Z',
+        status: 'synced'
+      });
+
+      // External event where student dragged the time to 15:00
+      const mockCalendar = {
+        events: {
+          list: async () => ({
+            data: {
+              items: [
+                {
+                  id: 'gcal_event_tampered',
+                  summary: '[LabLink] Keysight Oscilloscope',
+                  start: { dateTime: '2026-11-24T15:00:00.000Z' },
+                  end: { dateTime: '2026-11-24T17:00:00.000Z' },
+                  extendedProperties: {
+                    private: { lablinkBookingId: 'book_existing_1' }
+                  }
+                }
+              ],
+              nextSyncToken: 'syncToken_xyz'
+            }
+          })
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(mockCalendar);
+
+      const syncResult = await GoogleCalendarSyncService.performIncrementalSync('std_1');
+      expect(syncResult.success).toBe(true);
+      expect(syncResult.conflictsCount).toBe(1);
+      expect(syncResult.conflicts[0].type).toBe('external_booking_tamper');
+
+      // Crucial: LabLink booking must NOT have been silently altered
+      const officialBooking = store.getBookingById('book_existing_1');
+      expect(officialBooking.requestedStartTime).toBe('2026-11-24T10:00:00.000Z');
+    });
+
+    it('Inbound sync: detects external personal appointments overlapping with lab reservations', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+
+      // book_existing_1 is confirmed at 2026-11-24T10:00:00.000Z to 12:00:00.000Z
+      const mockCalendar = {
+        events: {
+          list: async () => ({
+            data: {
+              items: [
+                {
+                  id: 'personal_dentist_appt',
+                  summary: 'Dentist Appointment',
+                  start: { dateTime: '2026-11-24T11:00:00.000Z' }, // Overlaps 10:00-12:00
+                  end: { dateTime: '2026-11-24T12:30:00.000Z' }
+                }
+              ],
+              nextSyncToken: 'syncToken_abc'
+            }
+          })
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(mockCalendar);
+
+      const syncResult = await GoogleCalendarSyncService.performIncrementalSync('std_1');
+      expect(syncResult.conflictsCount).toBe(1);
+      expect(syncResult.conflicts[0].type).toBe('schedule_overlap');
+      expect(syncResult.conflicts[0].externalSummary).toBe('Dentist Appointment');
+    });
+
+    it('Inbound sync: recovers from expired syncToken (HTTP 410 Gone) with automatic full sync', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+      tokenStore.updateSyncState('std_1', { syncToken: 'expired_sync_token_410' });
+
+      let attempts = 0;
+      const mockCalendar = {
+        events: {
+          list: async ({ syncToken }) => {
+            attempts++;
+            if (syncToken === 'expired_sync_token_410') {
+              const err = new Error('Sync token is expired. Perform full sync.');
+              err.code = 410;
+              throw err;
+            }
+            return {
+              data: {
+                items: [],
+                nextSyncToken: 'fresh_new_sync_token'
+              }
+            };
+          }
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(mockCalendar);
+
+      const syncResult = await GoogleCalendarSyncService.performIncrementalSync('std_1');
+      expect(syncResult.success).toBe(true);
+      expect(attempts).toBe(2); // Attempt 1 threw 410, attempt 2 succeeded with full sync
+      expect(syncResult.syncToken).toBe('fresh_new_sync_token');
+    });
+
+    it('Disconnect and revocation: revokes tokens with Google and cleans vault', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'token_to_revoke'
+      });
+
+      let revokedToken = null;
+      const mockOAuthClient = {
+        revokeToken: async (token) => {
+          revokedToken = token;
+          return { data: {} };
+        }
+      };
+      GoogleOAuthService.setMockClient(mockOAuthClient);
+
+      const res = await request(app).post('/api/calendar/disconnect').send({ studentId: 'std_1' });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(revokedToken).toBe('token_to_revoke');
+
+      const status = tokenStore.getConnectionStatus('std_1');
+      expect(status.connected).toBe(false);
+      expect(tokenStore.getUserTokens('std_1')).toBeNull();
+    });
+
+    it('Resilience: Google API network error on approval does not crash booking endorsement', async () => {
+      tokenStore.saveUserTokens('std_1', {
+        googleEmail: 'aarav@campus.edu',
+        refreshToken: 'valid_refresh'
+      });
+
+      const failingCalendar = {
+        events: {
+          insert: async () => {
+            throw new Error('Google Calendar API 503 Service Unavailable');
+          }
+        }
+      };
+      GoogleCalendarSyncService.setMockCalendar(failingCalendar);
+
+      // Approval should still complete and confirm the booking in LabLink
+      const res = await request(app).post('/api/bookings/book_existing_1/endorse').send({
+        isApproved: true,
+        facultyId: 'fac_1'
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('confirmed');
     });
   });
 });
